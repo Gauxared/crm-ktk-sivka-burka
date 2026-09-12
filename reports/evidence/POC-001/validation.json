@@ -1,0 +1,50 @@
+{
+  "task": "POC-001",
+  "at": "2026-09-12T21:39:48.000998+00:00",
+  "status": "pass",
+  "gates": [
+    {
+      "name": "unit and HTTP contract tests",
+      "argv": [
+        "{python}",
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        "tests/poc",
+        "-v"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": "test_health_contract (test_health_contract.HealthContract.test_health_contract) ... ok\ntest_loopback_and_post (test_health_contract.HealthContract.test_loopback_and_post) ... ok\ntest_repeatable_body (test_health_contract.HealthContract.test_repeatable_body) ... ok\ntest_unknown_query_and_trailing_slash (test_health_contract.HealthContract.test_unknown_query_and_trailing_slash) ... ok\ntest_health (test_health_worker.HealthWorkerTests.test_health) ... ok\ntest_loopback_and_post (test_health_worker.HealthWorkerTests.test_loopback_and_post) ... ok\ntest_not_found (test_health_worker.HealthWorkerTests.test_not_found) ... ok\ntest_repeatable_body (test_health_worker.HealthWorkerTests.test_repeatable_body) ... ok\n\n----------------------------------------------------------------------\nRan 8 tests in 1.038s\n\nOK\n"
+    },
+    {
+      "name": "syntax",
+      "argv": [
+        "{python}",
+        "-c",
+        "from pathlib import Path; [compile(p.read_text(encoding='utf-8'), str(p), 'exec') for p in [Path('apps/api/health.py'), Path('tests/poc/test_health_worker.py')]]"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "name": "diff whitespace",
+      "argv": [
+        "git",
+        "diff",
+        "--check"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    }
+  ],
+  "files": [
+    "apps/api/health.py",
+    "tests/poc/test_health_worker.py"
+  ],
+  "scope": "pass",
+  "snapshot": "05006461aeadaed6145f35888cc8fe4681540f6100ad254832dcc5bd0acbfa78"
+}

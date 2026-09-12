@@ -1,0 +1,42 @@
+{
+  "id": "ARCH-003",
+  "title": "Define domain model",
+  "type": "architecture",
+  "status": "BACKLOG",
+  "priority": "high",
+  "executor": {
+    "preferred": "cloud",
+    "fallback": "cloud"
+  },
+  "reviewer": "cloud",
+  "depends_on": [
+    "ARCH-002"
+  ],
+  "allowed_paths": [
+    "docs/domain-model.md"
+  ],
+  "forbidden_paths": [],
+  "context": [
+    "docs/development-pipeline.md",
+    "docs/requirements.md"
+  ],
+  "requirements": [
+    "Define entities, terms and invariants using accepted requirements; do not invent operational policy"
+  ],
+  "acceptance": [
+    "Document reviewed by cloud lead; unresolved business choices explicitly resolved with user; status ACCEPTED only after review"
+  ],
+  "validation": [
+    {
+      "name": "accepted architecture document",
+      "argv": [
+        "{python}",
+        "-c",
+        "from pathlib import Path; text=Path('docs/domain-model.md').read_text(encoding='utf-8'); assert 'Status: ACCEPTED' in text and 'DRAFT PLACEHOLDER' not in text and len(text)>200"
+      ],
+      "timeout": 10
+    }
+  ],
+  "risk": "high",
+  "retry_limit": 0
+}

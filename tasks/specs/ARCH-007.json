@@ -1,0 +1,42 @@
+{
+  "id": "ARCH-007",
+  "title": "Define notification architecture",
+  "type": "architecture",
+  "status": "BACKLOG",
+  "priority": "high",
+  "executor": {
+    "preferred": "cloud",
+    "fallback": "cloud"
+  },
+  "reviewer": "cloud",
+  "depends_on": [
+    "ARCH-005"
+  ],
+  "allowed_paths": [
+    "docs/notifications.md"
+  ],
+  "forbidden_paths": [],
+  "context": [
+    "docs/development-pipeline.md",
+    "docs/requirements.md"
+  ],
+  "requirements": [
+    "Define notification events, channels, delivery guarantees, retries and ownership from accepted requirements"
+  ],
+  "acceptance": [
+    "Document reviewed by cloud lead; unresolved business choices explicitly resolved with user; status ACCEPTED only after review"
+  ],
+  "validation": [
+    {
+      "name": "accepted architecture document",
+      "argv": [
+        "{python}",
+        "-c",
+        "from pathlib import Path; text=Path('docs/notifications.md').read_text(encoding='utf-8'); assert 'Status: ACCEPTED' in text and 'DRAFT PLACEHOLDER' not in text and len(text)>200"
+      ],
+      "timeout": 10
+    }
+  ],
+  "risk": "high",
+  "retry_limit": 0
+}

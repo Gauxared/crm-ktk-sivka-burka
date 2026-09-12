@@ -1,0 +1,39 @@
+{
+  "reviewer": "cloud:codex",
+  "status": "PASS",
+  "commit": "23e39fd1c855c730219c5c13ecc6205d18f50627",
+  "tests_status": "pass",
+  "tests": {
+    "command": "python -m unittest discover -s tests/pipeline -v",
+    "passed": 26,
+    "elapsed_seconds": 14.66
+  },
+  "evidence": {
+    "PIPE-001": [
+      "README.md",
+      "tasks/TASK_TEMPLATE.md",
+      "docs/task-lifecycle.md",
+      "docs/agent-responsibilities.md"
+    ],
+    "PIPE-002": [
+      "scripts/policy.py",
+      "scripts/task.py",
+      "reports/evidence/bootstrap-tests.txt"
+    ],
+    "PIPE-003": [
+      "scripts/executors.py",
+      "docs/local-model.md",
+      "agents/local-worker.md"
+    ],
+    "PIPE-004": [
+      "scripts/task.py",
+      "tests/pipeline/test_pipeline.py",
+      "reports/evidence/bootstrap-tests.txt"
+    ]
+  },
+  "limitations": [
+    "Trusted local controller, not an OS sandbox",
+    "Cloud review identity is an explicit lead assertion",
+    "Genesis steps were implemented in primary checkout before worktree tools existed"
+  ]
+}

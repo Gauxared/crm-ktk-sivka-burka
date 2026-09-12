@@ -1,0 +1,38 @@
+{
+  "choices": [
+    {
+      "finish_reason": "stop",
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "{\"files\":[{\"path\":\"apps/api/health.py\",\"content\":\"import json\\nfrom http.server import BaseHTTPRequestHandler, ThreadingHTTPServer\\n\\n\\nclass HealthHandler(BaseHTTPRequestHandler):\\n    def _send_json(self, status, payload):\\n        body = json.dumps(payload).encode('utf-8')\\n        self.send_response(status)\\n        self.send_header('Content-Type', 'application/json; charset=utf-8')\\n        self.send_header('Content-Length', str(len(body)))\\n        self.end_headers()\\n        self.wfile.write(body)\\n\\n    def do_GET(self):\\n        if self.path == '/health':\\n            self._send_json(200, {'status': 'ok', 'service': 'sivka-burka-poc'})\\n        else:\\n            self._send_json(404, {'error': 'not_found'})\\n\\n    def log_message(self, format, *args):\\n        pass\\n\\n\\ndef make_server(host='127.0.0.1', port=0):\\n    return ThreadingHTTPServer((host, port), HealthHandler)\\n\"},{\"path\":\"tests/poc/test_health_worker.py\",\"content\":\"import http.client\\nimport importlib.util\\nimport json\\nfrom pathlib import Path\\nimport threading\\nimport unittest\\n\\n\\nclass HealthWorkerTests(unittest.TestCase):\\n    @classmethod\\n    def setUpClass(cls):\\n        path = Path(__file__).resolve().parents[2] / 'apps/api/health.py'\\n        spec = importlib.util.spec_from_file_location('poc_health_worker', path)\\n        module = importlib.util.module_from_spec(spec)\\n        spec.loader.exec_module(module)\\n        cls.server = module.make_server()\\n        cls.thread = threading.Thread(target=cls.server.serve_forever, daemon=True)\\n        cls.thread.start()\\n\\n    @classmethod\\n    def tearDownClass(cls):\\n        cls.server.shutdown()\\n        cls.server.server_close()\\n        cls.thread.join(timeout=3)\\n        if cls.thread.is_alive():\\n            raise AssertionError('Server thread did not stop')\\n\\n    def request(self, method, path):\\n        conn = http.client.HTTPConnection(*self.server.server_address, timeout=3)\\n        try:\\n            conn.request(method, path)\\n            response = conn.getresponse()\\n            return response.status, dict(response.getheaders()), response.read()\\n        finally:\\n            conn.close()\\n\\n    def test_health(self):\\n        status, headers, body = self.request('GET', '/health')\\n        self.assertEqual(status, 200)\\n        self.assertEqual(headers['Content-Type'], 'application/json; charset=utf-8')\\n        self.assertEqual(int(headers['Content-Length']), len(body))\\n        self.assertEqual(json.loads(body), {'status': 'ok', 'service': 'sivka-burka-poc'})\\n\\n    def test_not_found(self):\\n        for path in ('/', '/unknown', '/health?x=1', '/health/'):\\n            with self.subTest(path=path):\\n                status, headers, body = self.request('GET', path)\\n                self.assertEqual(status, 404)\\n                self.assertEqual(headers['Content-Type'], 'application/json; charset=utf-8')\\n                self.assertEqual(int(headers['Content-Length']), len(body))\\n                self.assertEqual(json.loads(body), {'error': 'not_found'})\\n\\n    def test_repeatable_body(self):\\n        self.assertEqual(self.request('GET', '/health')[2], self.request('GET', '/health')[2])\\n\\n    def test_loopback_and_post(self):\\n        self.assertEqual(self.server.server_address[0], '127.0.0.1')\\n        self.assertEqual(self.request('POST', '/health')[0], 501)\\n\"}],\"handoff\":{\"implemented\":[\"apps/api/health.py\",\"tests/poc/test_health_worker.py\"],\"architecture_changes\":[],\"known_issues\":[],\"validation\":\"not_run_by_model; host must validate\"},\"blocker\":null}"
+      }
+    }
+  ],
+  "created": 1789249164,
+  "model": "Qwen3.8-27B-UD-IQ3_XXS.gguf",
+  "system_fingerprint": "b9608-70b54e140",
+  "object": "chat.completion",
+  "usage": {
+    "completion_tokens": 871,
+    "prompt_tokens": 1535,
+    "total_tokens": 2406,
+    "prompt_tokens_details": {
+      "cached_tokens": 0
+    }
+  },
+  "id": "chatcmpl-dNY7wxeYqAO5sj3iEz4u0NAkdM7tPNKz",
+  "timings": {
+    "cache_n": 0,
+    "prompt_n": 1535,
+    "prompt_ms": 3691.817,
+    "prompt_per_token_ms": 2.4050925081433223,
+    "prompt_per_second": 415.78442268400624,
+    "predicted_n": 871,
+    "predicted_ms": 24931.794,
+    "predicted_per_token_ms": 28.62433295063146,
+    "predicted_per_second": 34.93531191538001,
+    "draft_n": 675,
+    "draft_n_accepted": 645
+  }
+}

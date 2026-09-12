@@ -1,8 +1,9 @@
 # КТК «Сивка-Бурка»: среда разработки
 
 Репозиторий для будущих сайта, бронирования, бота и CRM клуба в Шерегеше.
-Сейчас создаётся и проверяется только пайплайн разработки. Бизнес-архитектура
-и приложение ещё не реализованы. Python 3.12+ и Git — единственные зависимости.
+PIPE-001–PIPE-005 завершены: локальная модель реализовала POC, проверки и облачное
+ревью прошли, код слит, worktree удалён. Семь задач ARCH-001–007 созданы в BACKLOG.
+Бизнес-архитектура и приложение ещё не реализованы. Python 3.12+ и Git — единственные зависимости.
 
 Статус и доказательства: [отчёт](reports/PIPELINE_IMPLEMENTATION_REPORT.md).
 Правила: [пайплайн](docs/development-pipeline.md), [Git](docs/git-workflow.md),
@@ -10,20 +11,23 @@
 
 ## Работа с задачей
 
-Команды выполняются из основного checkout; пример для новой задачи:
+Команды выполняются из основного checkout. Сначала создайте новую спецификацию
+tasks/specs/TASK-001.json по шаблону; затем:
 
 ```powershell
-Copy-Item .env.example .env
-python scripts/task.py create tasks/specs/POC-001.json
-python scripts/task.py ready POC-001
-python scripts/task.py start POC-001
-python scripts/task.py run POC-001
-python scripts/task.py validate POC-001
-python scripts/task.py status POC-001
+if (-not (Test-Path .env)) { Copy-Item .env.example .env }
+python scripts/task.py create tasks/specs/TASK-001.json
+python scripts/task.py ready TASK-001
+python scripts/task.py start TASK-001
+python scripts/task.py run TASK-001
+python scripts/task.py validate TASK-001
+python scripts/task.py status TASK-001
 ```
 
 Повторно запускать уже завершённый POC не нужно. Для новой задачи создайте новый ID
 по tasks/TASK_TEMPLATE.md. State хранится локально в .pipeline/state.json.
+Для текущего turboLLM в проектном .env задано LOCAL_LLM_REASONING_EFFORT=off.
+Это параметр каждого запроса; настройки самого turboLLM раннер не меняет.
 
 ## Ревью и завершение
 

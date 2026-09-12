@@ -19,8 +19,9 @@ These are configuration observations, not proof of effective runtime settings or
 Live follow-up: llama-server.exe is the bundled llama.cpp-b9608-rocm runtime behind
 turboLLM (backend port 8081). Its initial launch argument and /props confirmed 16384;
 after the user changed runtime settings, /props confirmed n_ctx=51712. The quantization
-is still IQ3_XXS. The user also reported a KV quantization change; its exact type is not
-inferred from the context size. No claim of optimal RAM/VRAM usage is made.
+is still IQ3_XXS. The live process arguments subsequently confirmed --cache-type-k q4_0,
+--cache-type-v q4_0, -c 51712, -ngl 99 and --parallel 1.
+No claim of optimal RAM/VRAM usage is made.
 
 Initial WORKER_OK probe: 59 prompt tokens, 38 completion tokens including reasoning,
 1.95 s client elapsed, server decode ~27.96 tokens/s. A tiny probe is not a coding benchmark.
@@ -44,6 +45,12 @@ The adapter uses the latter, configured as LOCAL_LLM_REASONING_EFFORT=off in .en
 An empty setting omits this runtime-dependent parameter for portability. The current
 .env.example uses the observed 51712 context limit; task context is still explicitly bounded.
 The effect of UI-wide sliders was not independently verified; each worker request is explicit.
+
+POC attempt 2 with reasoning_effort=off succeeded: 1535 prompt tokens, 871 completion
+tokens, 28.875 seconds client elapsed, ~34.94 tokens/s server decode. Two permitted files
+were applied, eight HTTP tests passed (four independent lead cases plus four worker cases),
+cloud review passed and the branch was merged/cleaned up. Context and KV settings changed
+between attempts, so this is a functional recovery observation, not a controlled speed benchmark.
 
 GGUF files require an inference runtime; the file path itself is not an API.
 If turboLLM is unavailable, first inspect its logs/runtime and model choice. An alternative

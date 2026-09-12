@@ -1,0 +1,9 @@
+{
+  "implemented": [
+    "apps/api/health.py",
+    "tests/poc/test_health_worker.py"
+  ],
+  "architecture_changes": [],
+  "known_issues": [],
+  "validation": "not_run_by_model; host must validate"
+}
