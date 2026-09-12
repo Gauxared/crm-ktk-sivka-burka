@@ -22,6 +22,10 @@ def config(root):
     defaults = ['http://127.0.0.1:6996/v1', 'qwen3.8-27b|IQ3_XXS|10934860704', '', '16384', '4096', '180']
     result = {k: os.environ.get('LOCAL_LLM_' + k, values.get('LOCAL_LLM_' + k, d))
               for k, d in zip(keys, defaults)}
+    result['REASONING_EFFORT'] = os.environ.get('LOCAL_LLM_REASONING_EFFORT',
+                                               values.get('LOCAL_LLM_REASONING_EFFORT', ''))
+    require(result['REASONING_EFFORT'] in ('', 'off', 'low', 'medium', 'high', 'xhigh'),
+            'Unsupported LOCAL_LLM_REASONING_EFFORT')
     url = urlparse(result['BASE_URL'])
     require(url.scheme == 'http' and url.hostname in ('127.0.0.1', 'localhost', '::1')
             and not url.username and not url.password and not url.query and not url.fragment,
@@ -70,6 +74,8 @@ class LocalExecutor(AgentExecutor):
         payload = {'model': c['MODEL'], 'messages': [
             {'role': 'system', 'content': self.system_prompt}, {'role': 'user', 'content': user}],
             'max_tokens': c['MAX_OUTPUT'], 'stream': False, 'temperature': 0.2}
+        if c.get('REASONING_EFFORT'):
+            payload['reasoning_effort'] = c['REASONING_EFFORT']
         self.log_dir.mkdir(parents=True, exist_ok=True)
         (self.log_dir / 'request.json').write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding='utf-8')
         headers = {'Content-Type': 'application/json'}

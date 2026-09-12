@@ -1,0 +1,32 @@
+test_explicit_reasoning_effort_is_forwarded (test_executor.LocalTransportTests.test_explicit_reasoning_effort_is_forwarded) ... ok
+test_incomplete_response_rejected_with_raw_evidence (test_executor.LocalTransportTests.test_incomplete_response_rejected_with_raw_evidence) ... ok
+test_oversized_context_rejected_before_network (test_executor.LocalTransportTests.test_oversized_context_rejected_before_network) ... ok
+test_protocol_and_no_auth_in_log (test_executor.LocalTransportTests.test_protocol_and_no_auth_in_log) ... ok
+test_bootstrap_attestation_cannot_bypass_normal_lifecycle (test_pipeline.GitLifecycle.test_bootstrap_attestation_cannot_bypass_normal_lifecycle) ... ok
+test_changed_after_approval_is_rejected (test_pipeline.GitLifecycle.test_changed_after_approval_is_rejected) ... ok
+test_cleanup_before_done_is_rejected (test_pipeline.GitLifecycle.test_cleanup_before_done_is_rejected) ... ok
+test_committed_scope_violation_is_detected (test_pipeline.GitLifecycle.test_committed_scope_violation_is_detected) ... ok
+test_complete_worktree_validation_review_merge_cleanup (test_pipeline.GitLifecycle.test_complete_worktree_validation_review_merge_cleanup) ... ok
+test_concurrent_overlapping_scope_is_rejected (test_pipeline.GitLifecycle.test_concurrent_overlapping_scope_is_rejected) ... ok
+test_dependency_and_product_gate (test_pipeline.GitLifecycle.test_dependency_and_product_gate) ... ok
+test_failed_gate_cannot_review_or_finish (test_pipeline.GitLifecycle.test_failed_gate_cannot_review_or_finish) ... ok
+test_feedback_returns_active (test_pipeline.GitLifecycle.test_feedback_returns_active) ... ok
+test_integration_drift_requires_new_validation (test_pipeline.GitLifecycle.test_integration_drift_requires_new_validation) ... ok
+test_local_failure_feedback_and_fix_are_recorded (test_pipeline.GitLifecycle.test_local_failure_feedback_and_fix_are_recorded) ... ok
+test_retry_limit_escalates_without_api_call (test_pipeline.GitLifecycle.test_retry_limit_escalates_without_api_call) ... ok
+test_staged_outside_scope_hidden_by_working_copy_is_rejected (test_pipeline.GitLifecycle.test_staged_outside_scope_hidden_by_working_copy_is_rejected) ... ok
+test_untracked_out_of_scope_is_rejected (test_pipeline.GitLifecycle.test_untracked_out_of_scope_is_rejected) ... ok
+test_duplicate_case_and_blocker (test_pipeline.PolicyTests.test_duplicate_case_and_blocker) ... ok
+test_exclusive_controller (test_pipeline.PolicyTests.test_exclusive_controller) ... ok
+test_missing_context_and_remote_endpoint (test_pipeline.PolicyTests.test_missing_context_and_remote_endpoint) ... ok
+test_overlap_conservative (test_pipeline.PolicyTests.test_overlap_conservative) ... ok
+test_proposal_preflight_no_partial_writes (test_pipeline.PolicyTests.test_proposal_preflight_no_partial_writes) ... ok
+test_schema_checks (test_pipeline.PolicyTests.test_schema_checks) ... ok
+test_scope_and_forbidden_override (test_pipeline.PolicyTests.test_scope_and_forbidden_override) ... ok
+test_shared_requires_explicit_exception (test_pipeline.PolicyTests.test_shared_requires_explicit_exception) ... ok
+test_symlink_or_junction_escape (test_pipeline.PolicyTests.test_symlink_or_junction_escape) ... ok
+
+----------------------------------------------------------------------
+Ran 27 tests in 18.675s
+
+OK

@@ -45,6 +45,12 @@ class LocalTransportTests(unittest.TestCase):
         self.assertFalse(self.requests[0]['stream'])
         text = (Path(self.temp.name) / 'request.json').read_text()
         self.assertNotIn('fixture-not-a-secret', text)
+        self.assertNotIn('reasoning_effort', self.requests[0])
+
+    def test_explicit_reasoning_effort_is_forwarded(self):
+        self.settings['REASONING_EFFORT'] = 'off'
+        LocalExecutor(self.settings, 'Bounded worker', self.temp.name).run({}, {})
+        self.assertEqual(self.requests[0]['reasoning_effort'], 'off')
 
     def test_incomplete_response_rejected_with_raw_evidence(self):
         self.response['choices'][0]['finish_reason'] = 'length'

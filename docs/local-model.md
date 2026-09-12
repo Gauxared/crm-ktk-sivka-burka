@@ -16,18 +16,34 @@ Saved preset has ctx=8192. useMmproj=true conflicts in intent with extra --no-mm
 and --no-mmproj-auto; actual server flag precedence was not verified here.
 These are configuration observations, not proof of effective runtime settings or optimality.
 
+Live follow-up: llama-server.exe is the bundled llama.cpp-b9608-rocm runtime behind
+turboLLM (backend port 8081). Its initial launch argument and /props confirmed 16384;
+after the user changed runtime settings, /props confirmed n_ctx=51712. The quantization
+is still IQ3_XXS. The user also reported a KV quantization change; its exact type is not
+inferred from the context size. No claim of optimal RAM/VRAM usage is made.
+
 Initial WORKER_OK probe: 59 prompt tokens, 38 completion tokens including reasoning,
 1.95 s client elapsed, server decode ~27.96 tokens/s. A tiny probe is not a coding benchmark.
 Non-streaming completions verified. Streaming and native tool calling are not required
 by this adapter and have not been verified. No undocumented runtime behavior is required.
 
-The runner defaults to 16384 context and 4096 maximum completion tokens, temperature 0.2
+The generic runner defaults to 16384 context and 4096 maximum completion tokens, temperature 0.2
 for bounded coding requests. This per-request setting does not modify the saved profile.
 Input uses a conservative UTF-8 byte ceiling with output and framing reserves, not an exact
 tokenizer count. Reject oversized contexts rather than silently truncating contracts.
 Only task context and previous scoped edits/feedback are sent. The model returns a JSON
 file envelope; host applies it. Reasoning may consume completion budget; incomplete answers
 are failures. API timeout is configurable, default 180 seconds, and retries are bounded.
+
+POC attempt 1 failed with finish_reason=length: 4096 completion tokens were consumed
+by reasoning, with no content/file proposal. The installed chat template defaults to
+xhigh when reasoning is enabled. This is why enlarging context alone does not fix it.
+Two isolated probes succeeded with no reasoning block: nested
+chat_template_kwargs.enable_thinking=false, and top-level reasoning_effort="off".
+The adapter uses the latter, configured as LOCAL_LLM_REASONING_EFFORT=off in .env.
+An empty setting omits this runtime-dependent parameter for portability. The current
+.env.example uses the observed 51712 context limit; task context is still explicitly bounded.
+The effect of UI-wide sliders was not independently verified; each worker request is explicit.
 
 GGUF files require an inference runtime; the file path itself is not an API.
 If turboLLM is unavailable, first inspect its logs/runtime and model choice. An alternative
