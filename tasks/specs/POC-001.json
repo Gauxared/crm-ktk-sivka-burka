@@ -1,0 +1,72 @@
+{
+  "id": "POC-001",
+  "title": "Implement minimal standard-library health API",
+  "type": "implementation",
+  "status": "BACKLOG",
+  "priority": "high",
+  "executor": {
+    "preferred": "local",
+    "fallback": "cloud"
+  },
+  "reviewer": "cloud",
+  "depends_on": [
+    "PIPE-004"
+  ],
+  "allowed_paths": [
+    "apps/api/health.py",
+    "tests/poc/test_health_worker.py"
+  ],
+  "forbidden_paths": [
+    "tests/poc/test_health_contract.py",
+    "scripts/**",
+    "packages/**",
+    ".env*"
+  ],
+  "context": [
+    "docs/poc-health-contract.md",
+    "tests/poc/test_health_contract.py"
+  ],
+  "requirements": [
+    "Implement exactly the supplied approved health contract",
+    "Add worker-owned unittest tests; do not edit independent lead tests",
+    "Use only standard library; no dependencies or business features"
+  ],
+  "acceptance": [
+    "Requirements satisfied; validation passes; cloud review PASS"
+  ],
+  "validation": [
+    {
+      "name": "unit and HTTP contract tests",
+      "argv": [
+        "{python}",
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        "tests/poc",
+        "-v"
+      ],
+      "timeout": 30
+    },
+    {
+      "name": "syntax",
+      "argv": [
+        "{python}",
+        "-c",
+        "from pathlib import Path; [compile(p.read_text(encoding='utf-8'), str(p), 'exec') for p in [Path('apps/api/health.py'), Path('tests/poc/test_health_worker.py')]]"
+      ],
+      "timeout": 10
+    },
+    {
+      "name": "diff whitespace",
+      "argv": [
+        "git",
+        "diff",
+        "--check"
+      ],
+      "timeout": 10
+    }
+  ],
+  "risk": "low",
+  "retry_limit": 1
+}

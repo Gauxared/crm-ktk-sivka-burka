@@ -1,0 +1,45 @@
+{
+  "id": "PIPE-005",
+  "title": "Real local worker proof of concept",
+  "type": "bootstrap",
+  "status": "BACKLOG",
+  "priority": "high",
+  "executor": {
+    "preferred": "cloud",
+    "fallback": "cloud"
+  },
+  "reviewer": "cloud",
+  "depends_on": [
+    "PIPE-004"
+  ],
+  "allowed_paths": [
+    "reports/**"
+  ],
+  "forbidden_paths": [],
+  "context": [
+    "docs/development-pipeline.md"
+  ],
+  "requirements": [
+    "POC-001 locally implemented, validated, reviewed, merged, DONE and cleaned up"
+  ],
+  "acceptance": [
+    "Requirements satisfied; validation passes; cloud review PASS"
+  ],
+  "validation": [
+    {
+      "name": "pipeline tests",
+      "argv": [
+        "{python}",
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        "tests/pipeline",
+        "-v"
+      ],
+      "timeout": 120
+    }
+  ],
+  "risk": "medium",
+  "retry_limit": 1
+}

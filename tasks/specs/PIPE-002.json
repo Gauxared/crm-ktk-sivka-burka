@@ -1,0 +1,46 @@
+{
+  "id": "PIPE-002",
+  "title": "Git isolation and path protection",
+  "type": "bootstrap",
+  "status": "BACKLOG",
+  "priority": "high",
+  "executor": {
+    "preferred": "cloud",
+    "fallback": "cloud"
+  },
+  "reviewer": "cloud",
+  "depends_on": [
+    "PIPE-001"
+  ],
+  "allowed_paths": [
+    "scripts/**",
+    "tests/pipeline/**"
+  ],
+  "forbidden_paths": [],
+  "context": [
+    "docs/development-pipeline.md"
+  ],
+  "requirements": [
+    "Create task branches/worktrees; reject scope violations and shared path edits"
+  ],
+  "acceptance": [
+    "Requirements satisfied; validation passes; cloud review PASS"
+  ],
+  "validation": [
+    {
+      "name": "pipeline tests",
+      "argv": [
+        "{python}",
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        "tests/pipeline",
+        "-v"
+      ],
+      "timeout": 120
+    }
+  ],
+  "risk": "medium",
+  "retry_limit": 1
+}

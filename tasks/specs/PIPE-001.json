@@ -1,0 +1,47 @@
+{
+  "id": "PIPE-001",
+  "title": "Repository and task architecture",
+  "type": "bootstrap",
+  "status": "BACKLOG",
+  "priority": "high",
+  "executor": {
+    "preferred": "cloud",
+    "fallback": "cloud"
+  },
+  "reviewer": "cloud",
+  "depends_on": [],
+  "allowed_paths": [
+    "README.md",
+    "docs/**",
+    "agents/**",
+    "tasks/**",
+    "decisions/**"
+  ],
+  "forbidden_paths": [],
+  "context": [
+    "docs/development-pipeline.md"
+  ],
+  "requirements": [
+    "Define task schema, lifecycle, roles and canonical document placeholders"
+  ],
+  "acceptance": [
+    "Requirements satisfied; validation passes; cloud review PASS"
+  ],
+  "validation": [
+    {
+      "name": "pipeline tests",
+      "argv": [
+        "{python}",
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        "tests/pipeline",
+        "-v"
+      ],
+      "timeout": 120
+    }
+  ],
+  "risk": "medium",
+  "retry_limit": 1
+}

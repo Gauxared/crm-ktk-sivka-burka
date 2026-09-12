@@ -1,0 +1,47 @@
+{
+  "id": "PIPE-003",
+  "title": "Local executor abstraction",
+  "type": "bootstrap",
+  "status": "BACKLOG",
+  "priority": "high",
+  "executor": {
+    "preferred": "cloud",
+    "fallback": "cloud"
+  },
+  "reviewer": "cloud",
+  "depends_on": [
+    "PIPE-002"
+  ],
+  "allowed_paths": [
+    "scripts/**",
+    "agents/**",
+    "docs/**"
+  ],
+  "forbidden_paths": [],
+  "context": [
+    "docs/development-pipeline.md"
+  ],
+  "requirements": [
+    "Connect loopback OpenAI-compatible API; bound context and file writes"
+  ],
+  "acceptance": [
+    "Requirements satisfied; validation passes; cloud review PASS"
+  ],
+  "validation": [
+    {
+      "name": "pipeline tests",
+      "argv": [
+        "{python}",
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        "tests/pipeline",
+        "-v"
+      ],
+      "timeout": 120
+    }
+  ],
+  "risk": "medium",
+  "retry_limit": 1
+}

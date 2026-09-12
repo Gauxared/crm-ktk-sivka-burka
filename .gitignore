@@ -1,0 +1,11 @@
+.env
+.env.*
+!.env.example
+__pycache__/
+*.py[cod]
+.worktrees/
+.pipeline/*
+!.pipeline/.gitkeep
+reports/runs/
+.venv/
+node_modules/
