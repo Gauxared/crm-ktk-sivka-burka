@@ -1,0 +1,70 @@
+{
+  "id": "ARCH-008",
+  "title": "Reconcile notification persistence and operator commands",
+  "type": "architecture",
+  "status": "BACKLOG",
+  "priority": "high",
+  "executor": {
+    "preferred": "cloud",
+    "fallback": "cloud"
+  },
+  "reviewer": "cloud",
+  "depends_on": [
+    "ARCH-006",
+    "ARCH-007",
+    "FLOW-001"
+  ],
+  "allowed_paths": [
+    "docs/database.md",
+    "docs/notifications.md",
+    "docs/api.md",
+    "reports/IMPLEMENTATION_READINESS.md",
+    "tasks/specs/ARCH-008.json"
+  ],
+  "forbidden_paths": [],
+  "context": [
+    "docs/development-pipeline.md"
+  ],
+  "requirements": [
+    "Unify notification storage, leases, retries and audit in database contract.",
+    "Define authenticated idempotent operator commands and concurrency rules.",
+    "Record current read-only environment inventory and next implementation prerequisites."
+  ],
+  "acceptance": [
+    "No remaining forward reference to unspecifed notification cycle schema or operator API",
+    "Documentation consistent, existing business behavior retained, no deployment or live messages"
+  ],
+  "validation": [
+    {
+      "name": "accepted documents",
+      "argv": [
+        "{python}",
+        "-c",
+        "from pathlib import Path; [(__import__('builtins').exec(\"assert 'Status: ACCEPTED' in s\", {'s':Path(p).read_text(encoding='utf-8')})) for p in ['docs/api.md','docs/database.md','docs/notifications.md']]"
+      ],
+      "timeout": 10
+    },
+    {
+      "name": "whitespace",
+      "argv": [
+        "git",
+        "diff",
+        "--check"
+      ],
+      "timeout": 10
+    }
+  ],
+  "risk": "high",
+  "retry_limit": 0,
+  "shared_paths_approval": {
+    "paths": [
+      "docs/database.md",
+      "docs/notifications.md",
+      "docs/api.md",
+      "reports/IMPLEMENTATION_READINESS.md",
+      "tasks/specs/ARCH-008.json"
+    ],
+    "reviewer": "cloud:codex",
+    "reason": "User authorized continuation: reconcile accepted architecture before implementation."
+  }
+}
