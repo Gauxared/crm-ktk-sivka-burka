@@ -1,0 +1,32 @@
+{
+  "id": "DB-006",
+  "title": "Persist owner accounts and revocable server sessions",
+  "type": "implementation",
+  "status": "BACKLOG",
+  "priority": "high",
+  "executor": {"preferred": "cloud", "fallback": "cloud"},
+  "reviewer": "cloud",
+  "depends_on": ["DB-005", "ARCH-005", "ARCH-006"],
+  "allowed_paths": ["alembic/**", "tests/db006/**", "tasks/specs/DB-006.json"],
+  "forbidden_paths": [".env", ".env.*", "apps/**", "tests/api/**", "tests/integration/**", "docs/**", "packages/**"],
+  "context": ["AGENTS.md", "docs/development-pipeline.md", "docs/database.md", "docs/api.md", "alembic/versions/20260913_05_audit_notification_outbox.py", "tests/db005"],
+  "requirements": [
+    "Add the next Alembic revision for owner_accounts and owner_sessions exactly within the accepted database and API contracts.",
+    "Persist only a unique owner login, non-empty password hash, disabled marker and positive credentials version for the single administrative subject; no bootstrap account, plaintext password, role assignment or public registration is introduced.",
+    "Persist only a session-token digest, owner reference, credentials version, CSRF secret, created/last-seen/expiry timestamps and optional revocation marker. Raw session-cookie values must never be stored.",
+    "Add isolated PostgreSQL migration tests under tests/db006. They must create a uniquely named disposable database, apply Alembic head there, assert the required constraints and clean up in finally; they must never write to the configured source DATABASE_URL.",
+    "Do not add password verification, cookie handling, session endpoints, owner commands, notification delivery, production configuration or external authentication providers."
+  ],
+  "acceptance": [
+    "A clean PostgreSQL database reaches the DB-006 Alembic head with owner account and revocable session storage, while all previous schema remains available.",
+    "The database rejects duplicate owner logins, invalid credentials versions, empty security material, invalid session expiry and a session without its owner.",
+    "Focused migration tests and whitespace checks pass, and the tests do not mutate the configured source database."
+  ],
+  "validation": [
+    {"name": "DB-006 PostgreSQL tests", "argv": ["{python}", "-m", "pytest", "tests/db006", "-q"], "timeout": 180},
+    {"name": "whitespace", "argv": ["git", "diff", "--check"], "timeout": 10}
+  ],
+  "risk": "high",
+  "retry_limit": 0,
+  "shared_paths_approval": {"paths": ["alembic/**", "tests/db006/**", "tasks/specs/DB-006.json"], "reviewer": "cloud:codex", "reason": "Accepted owner-session persistence is the smallest prerequisite for the closed CRM API; the task excludes credential handling and runtime authentication."}
+}
