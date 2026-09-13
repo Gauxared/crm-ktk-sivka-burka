@@ -57,3 +57,18 @@ docker compose --env-file .env down
 `down --volumes` удалит development-данные и должен использоваться только осознанно.
 Перед выполнением будущих миграций проверим `pg_isready`, подключение и восстановление
 из тестовой копии. Не подключайте существующую БД и не используйте production credentials.
+
+## Alembic baseline DB-001
+
+DB-001 добавляет только технический guard и пустой каталог. Миграция не наполняет прайс,
+не создаёт заявок и не делает публичных запросов. Alembic всегда получает адрес базы через
+`DATABASE_URL`; он не читает `.env` и не выбирает удалённую БД сам.
+
+```powershell
+$env:DATABASE_URL = (Get-Content .env.example | Where-Object { $_ -like 'DATABASE_URL=*' }).Split('=', 2)[1]
+.\.venv\Scripts\python -m alembic -c alembic.ini upgrade head
+.\.venv\Scripts\python -m pytest tests/integration -q
+```
+
+Интеграционный тест создаёт и удаляет отдельную базу `sivka_db001_test` в локальном контейнере.
+Он не должен выполняться с URL общей или production-базы.

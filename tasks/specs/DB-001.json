@@ -1,0 +1,19 @@
+{
+  "id": "DB-001",
+  "title": "Create Alembic baseline for catalog and write guard",
+  "type": "implementation",
+  "status": "BACKLOG",
+  "priority": "high",
+  "executor": {"preferred": "cloud", "fallback": "cloud"},
+  "reviewer": "cloud",
+  "depends_on": ["ARCH-006", "ARCH-008", "ENV-001", "PIPE-007"],
+  "allowed_paths": ["alembic.ini", "alembic/**", "apps/api/sivka_burka_api/db.py", "tests/integration/**", "docs/development-setup.md", "tasks/specs/DB-001.json"],
+  "forbidden_paths": [".env", ".env.*", "apps/web/**", "apps/bot/**", "apps/admin/**", "packages/**"],
+  "context": ["docs/database.md", "docs/development-setup.md", "docs/development-pipeline.md"],
+  "requirements": ["Set up Alembic with explicit DATABASE_URL input and a migration-only path; runtime schema ownership remains separate from the application database role.", "Create the baseline migration only for business_write_guard, club_settings, services and service_options, including normative UUID, version, enum/check, foreign-key and index constraints from ARCH-006.", "Do not seed commercial catalog data, create inquiries, contacts, visits, money records, authentication, bots, public endpoints or business commands.", "Add a PostgreSQL integration test that upgrades an empty disposable schema/database and proves the guard singleton and catalog constraints; document the local command and cleanup boundary."],
+  "acceptance": ["An empty PostgreSQL target upgrades to the DB-001 Alembic head and contains the required four tables and guard row.", "The integration test rejects duplicate guard identity and invalid catalog pricing-mode combinations.", "No client, booking, payment or channel behavior is introduced."],
+  "validation": [{"name": "API unit tests", "argv": ["{python}", "-m", "pytest", "tests/api", "-q"], "timeout": 60}, {"name": "PostgreSQL integration tests", "argv": ["{python}", "-m", "pytest", "tests/integration", "-q"], "timeout": 90}, {"name": "Alembic current", "argv": ["{python}", "-m", "alembic", "-c", "alembic.ini", "current"], "timeout": 30}, {"name": "whitespace", "argv": ["git", "diff", "--check"], "timeout": 10}],
+  "risk": "high",
+  "retry_limit": 0,
+  "shared_paths_approval": {"paths": ["alembic.ini", "alembic/**", "apps/api/sivka_burka_api/db.py", "tests/integration/**", "docs/development-setup.md", "tasks/specs/DB-001.json"], "reviewer": "cloud:codex", "reason": "The user authorized implementation and Docker PostgreSQL is now verified locally; the accepted schema calls for a migration-only baseline before vertical business behavior."}
+}
