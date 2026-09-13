@@ -64,6 +64,9 @@ DB-001 добавляет только технический guard и пуст�
 не создаёт заявок и не делает публичных запросов. Alembic всегда получает адрес базы через
 `DATABASE_URL`; он не читает `.env` и не выбирает удалённую БД сам.
 
+DB-002 расширяет только схему: карточки контактов, идентичности Telegram/VK, заявки и их
+согласуемые условия. Команд создания, смены статуса и HTTP-endpoint в этих ревизиях нет.
+
 ```powershell
 $env:DATABASE_URL = (Get-Content .env.example | Where-Object { $_ -like 'DATABASE_URL=*' }).Split('=', 2)[1]
 .\.venv\Scripts\python -m alembic -c alembic.ini upgrade head
