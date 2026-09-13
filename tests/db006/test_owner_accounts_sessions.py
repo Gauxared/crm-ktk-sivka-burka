@@ -64,29 +64,66 @@ def test_head_contains_owner_storage_and_constraints(database):
         connection.execute(text("INSERT INTO owner_sessions (token_digest, owner_id, credentials_version, csrf_secret, created_at, last_seen_at, expires_at) VALUES (:token, :owner, 1, :csrf, :created, :seen, :expires)"), {"token": b"digest", "owner": connection.execute(text("SELECT id FROM owner_accounts")).scalar_one(), "csrf": b"csrf", "created": now, "seen": now, "expires": now + timedelta(hours=1)})
 
 
-@pytest.mark.parametrize("sql,params", [
-    ("INSERT INTO owner_accounts (id, login, password_hash, credentials_version) VALUES (:id, 'owner', :hash, 1)", {"id": uuid4(), "hash": b"hash"}),
-    ("INSERT INTO owner_accounts (id, login, password_hash, credentials_version) VALUES (:id, 'other', :hash, 0)", {"id": uuid4(), "hash": b"hash"}),
-    ("INSERT INTO owner_accounts (id, login, password_hash, credentials_version) VALUES (:id, 'empty', :hash, 1)", {"id": uuid4(), "hash": b""}),
-])
-def test_account_constraints(database, sql, params):
+@pytest.mark.parametrize("login", [""])
+def test_account_rejects_empty_login(database, login):
+    with pytest.raises(IntegrityError):
+        with database.begin() as connection:
+            connection.execute(text("INSERT INTO owner_accounts (id, login, password_hash, credentials_version) VALUES (:id, :login, :hash, 1)"), {"id": uuid4(), "login": login, "hash": b"hash"})
+
+
+def test_account_rejects_duplicate_login(database):
     with database.begin() as connection:
         connection.execute(text("INSERT INTO owner_accounts (id, login, password_hash, credentials_version) VALUES (:id, 'owner', :hash, 1)"), {"id": uuid4(), "hash": b"hash"})
     with pytest.raises(IntegrityError):
         with database.begin() as connection:
-            connection.execute(text(sql), params)
+            connection.execute(text("INSERT INTO owner_accounts (id, login, password_hash, credentials_version) VALUES (:id, 'owner', :hash, 1)"), {"id": uuid4(), "hash": b"other"})
 
 
-@pytest.mark.parametrize("fields", [
-    {"owner": uuid4(), "digest": b"bad-owner", "csrf": b"csrf", "created": datetime(2026, 1, 1, tzinfo=timezone.utc), "seen": datetime(2026, 1, 1, tzinfo=timezone.utc), "expires": datetime(2025, 1, 1, tzinfo=timezone.utc)},
-    {"owner": None, "digest": b"no-owner", "csrf": b"csrf", "created": datetime(2026, 1, 1, tzinfo=timezone.utc), "seen": datetime(2026, 1, 1, tzinfo=timezone.utc), "expires": datetime(2027, 1, 1, tzinfo=timezone.utc)},
-    {"owner": None, "digest": b"no-csrf", "csrf": b"", "created": datetime(2026, 1, 1, tzinfo=timezone.utc), "seen": datetime(2026, 1, 1, tzinfo=timezone.utc), "expires": datetime(2027, 1, 1, tzinfo=timezone.utc)},
-])
-def test_session_constraints(database, fields):
-    with database.begin() as connection:
-        owner = account_values()
-        connection.execute(text("INSERT INTO owner_accounts (id, login, password_hash, credentials_version) VALUES (:id, :login, :password_hash, :credentials_version)"), owner)
-        if fields["owner"] is None and fields["digest"] == b"no-csrf":
-            fields = {**fields, "owner": owner["id"]}
-        with pytest.raises(IntegrityError):
-            connection.execute(text("INSERT INTO owner_sessions (token_digest, owner_id, credentials_version, csrf_secret, created_at, last_seen_at, expires_at) VALUES (:digest, :owner, 1, :csrf, :created, :seen, :expires)"), fields)
+@pytest.mark.parametrize("password_hash", [b""])
+def test_account_rejects_empty_password_hash(database, password_hash):
+    with pytest.raises(IntegrityError):
+        with database.begin() as connection:
+            connection.execute(text("INSERT INTO owner_accounts (id, login, password_hash, credentials_version) VALUES (:id, 'owner', :hash, 1)"), {"id": uuid4(), "hash": password_hash})
+
+
+@pytest.mark.parametrize("credentials_version", [0, -1])
+def test_account_rejects_non_positive_credentials_version(database, credentials_version):
+    with pytest.raises(IntegrityError):
+        with database.begin() as connection:
+            connection.execute(text("INSERT INTO owner_accounts (id, login, password_hash, credentials_version) VALUES (:id, 'owner', :hash, :version)"), {"id": uuid4(), "hash": b"hash", "version": credentials_version})
+
+
+def session_values(owner_id):
+    created = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    return {"digest": b"digest", "owner": owner_id, "version": 1, "csrf": b"csrf", "created": created, "seen": created, "expires": created + timedelta(hours=1), "revoked": None}
+
+
+def persisted_owner(connection):
+    owner = account_values()
+    connection.execute(text("INSERT INTO owner_accounts (id, login, password_hash, credentials_version) VALUES (:id, :login, :password_hash, :credentials_version)"), owner)
+    return owner["id"]
+
+
+@pytest.mark.parametrize("field,value", [("digest", b"") , ("csrf", b"") , ("version", 0), ("version", -1)])
+def test_session_rejects_empty_material_and_non_positive_version(database, field, value):
+    with pytest.raises(IntegrityError):
+        with database.begin() as connection:
+            values = session_values(persisted_owner(connection))
+            values[field] = value
+            connection.execute(text("INSERT INTO owner_sessions (token_digest, owner_id, credentials_version, csrf_secret, created_at, last_seen_at, expires_at, revoked_at) VALUES (:digest, :owner, :version, :csrf, :created, :seen, :expires, :revoked)"), values)
+
+
+@pytest.mark.parametrize("field", ["expires", "seen", "revoked"])
+def test_session_rejects_temporal_value_before_creation(database, field):
+    with pytest.raises(IntegrityError):
+        with database.begin() as connection:
+            values = session_values(persisted_owner(connection))
+            values[field] = values["created"] - timedelta(seconds=1)
+            connection.execute(text("INSERT INTO owner_sessions (token_digest, owner_id, credentials_version, csrf_secret, created_at, last_seen_at, expires_at, revoked_at) VALUES (:digest, :owner, :version, :csrf, :created, :seen, :expires, :revoked)"), values)
+
+
+def test_session_rejects_unknown_owner_foreign_key(database):
+    with pytest.raises(IntegrityError):
+        with database.begin() as connection:
+            values = session_values(uuid4())
+            connection.execute(text("INSERT INTO owner_sessions (token_digest, owner_id, credentials_version, csrf_secret, created_at, last_seen_at, expires_at, revoked_at) VALUES (:digest, :owner, :version, :csrf, :created, :seen, :expires, :revoked)"), values)
