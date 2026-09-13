@@ -183,6 +183,66 @@ class Pipeline:
             self.event(r, 'local_failed', reason=r['blocker'])
             raise PipelineError(r['blocker']) from exc
 
+    def drive(self, task_id):
+        """Advance only deterministic lifecycle steps for an authorized task.
+
+        Implementation and review remain deliberate Codex responsibilities in the
+        task worktree.  This method never fabricates either kind of evidence.
+        """
+        r = self.get(task_id)
+        actions = []
+        if r['state'] == 'BLOCKED':
+            return {'status': 'blocked', 'task': task_id, 'blocker': r['blocker']}
+
+        if r['state'] == 'BACKLOG':
+            self.ready(task_id)
+            actions.append('ready')
+            r = self.get(task_id)
+
+        if r['state'] == 'READY':
+            self.start(task_id)
+            actions.append('started')
+            r = self.get(task_id)
+
+        if r['state'] == 'ACTIVE':
+            require(git(self.root, 'branch', '--show-current') == r['target'],
+                    'Wrong integration branch')
+            if git(self.root, 'rev-parse', 'HEAD') != r['base']:
+                wt = self.worktree(r)
+                if not git(wt, 'status', '--porcelain'):
+                    self.reconcile(task_id)
+                    actions.append('reconciled')
+                    r = self.get(task_id)
+                else:
+                    return {'status': 'reconcile_required', 'task': task_id, 'actions': actions,
+                            'worktree': r['worktree'],
+                            'next': 'Finish or safely preserve the current worktree changes, then reconcile and revalidate.'}
+            _, paths = snapshot(self.worktree(r), r['base'], r['task'])
+            if not paths:
+                return {'status': 'implementation_required', 'task': task_id, 'actions': actions,
+                        'worktree': r['worktree'],
+                        'next': 'Implement the accepted task in allowed_paths, then run drive again.'}
+            self.validate(task_id)
+            actions.append('validated')
+            r = self.get(task_id)
+
+        if r['state'] == 'REVIEW':
+            review = r.get('review')
+            if not review:
+                return {'status': 'self_review_required', 'task': task_id, 'actions': actions,
+                        'worktree': r['worktree'],
+                        'next': 'Inspect the actual diff, acceptance criteria and validation evidence; write a self-review, then submit it with review.'}
+            require(review.get('status') == 'PASS', 'Current PASS review required')
+            self.finish(task_id)
+            actions.append('finished')
+            self.cleanup(task_id)
+            actions.append('cleaned_up')
+            r = self.get(task_id)
+
+        require(r['state'] == 'DONE', f'Unexpected drive state: {r["state"]}')
+        return {'status': 'done', 'task': task_id, 'actions': actions,
+                'merge_commit': r.get('merge_commit')}
+
     def validate(self, task_id):
         r = self.get(task_id)
         require(r['state'] in ('ACTIVE', 'REVIEW'), 'Validation requires ACTIVE or REVIEW')
@@ -303,7 +363,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest='command', required=True)
     sub.add_parser('create').add_argument('spec')
-    for name in ('ready', 'start', 'validate', 'finish', 'cleanup', 'handoff', 'reconcile'):
+    for name in ('ready', 'start', 'validate', 'finish', 'cleanup', 'handoff', 'reconcile', 'drive'):
         sub.add_parser(name).add_argument('id')
     run = sub.add_parser('run')
     run.add_argument('id')

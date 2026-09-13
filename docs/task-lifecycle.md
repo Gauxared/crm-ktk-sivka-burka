@@ -39,6 +39,19 @@ Merge conflicts block; resolve explicitly, do not use forced cleanup or discard 
 
 ## Execution policy v2
 
+Accepted requirements, acceptance criteria, dependencies and allowed_paths pre-authorize the
+complete safe lifecycle. The Codex lead proceeds through ordinary stages and recovery without
+asking for a human checkpoint. Escalate only for an unresolved product/contract decision,
+credentials or unavailable access, paid/production action, destructive operation, required scope
+expansion, or an exhausted local recovery path. A failing gate or review finding starts the
+`diagnose → fix → validate again → review again` loop.
+
+`drive ID` performs only deterministic controller work. It prepares BACKLOG/READY tasks, validates
+an ACTIVE task once it has an in-scope diff, returns `implementation_required` or
+`self_review_required` when Codex judgment is needed, and finishes plus cleans up only a current
+PASS review. It returns a concrete `blocked` or `reconcile_required` result instead of bypassing
+safeguards. Call it again after implementation, a fix, review submission, or safe reconciliation.
+
 New task templates use cloud. `run ID` on ACTIVE cloud tasks prepares a manual context
 handoff and does not touch local configuration or inference. The current Codex agent edits
 the worktree directly. `run ID --experimental-local` is required for ACTIVE local tasks;

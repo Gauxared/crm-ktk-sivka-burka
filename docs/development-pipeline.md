@@ -15,6 +15,35 @@
 5. Review фактического diff и результатов, затем validate/review/finish/cleanup.
    При изменении после validation необходим новый validation и новый review.
 
+## Автономное исполнение принятой задачи
+
+Когда задача или план приняты и в task spec определены requirements, acceptance, зависимости и
+allowed_paths, весь безопасный обратимый цикл уже авторизован. Codex не ждёт подтверждения между
+анализом, реализацией, тестами, исправлениями, validation, self-review, reconcile, finish и
+cleanup. Обычная неопределённость реализации решается по принятым контрактам с минимальным
+безопасным обратимым выбором и при необходимости фиксируется в результате работы.
+
+Нормальный recovery loop: `diagnose → fix → validate again → review again → continue`.
+После изменения базовой ветки Codex использует `reconcile`, когда его проверки применимы, а затем
+повторяет validation и review. Ошибка теста, lint, рабочий дефект, конфликт, повторная проверка или
+локальный рефакторинг в allowed_paths не требуют вопроса владельцу продукта.
+
+Эскалация — исключение. Она нужна только для неразрешимого противоречия принятых контрактов,
+существенного продуктового выбора без безопасного default, credentials/недоступного доступа,
+платного или production-действия, необратимого действия, выхода за allowed_paths либо исчерпанного
+локального recovery path. Сообщение содержит один конкретный blocker и решение или доступ, который
+нужен для продолжения.
+
+Один Codex может быть исполнителем и reviewer. Тогда review явно называется self-review: он
+проверяет фактический diff, acceptance criteria, validation evidence и оправданные негативные
+сценарии. Такое evidence не называется независимым review и не заменяется формальным агентом.
+
+`python scripts/task.py drive ID` убирает routine controller checkpoints: переводит BACKLOG в READY
+и READY в ACTIVE, запускает validation после фактического изменения, а после текущего PASS review
+выполняет finish и cleanup. Команда останавливается для реализации или self-review, потому что
+controller не имеет права писать продуктовый код или выдумывать review evidence. Она сохраняет lock,
+dependency, scope, validation-snapshot, stale-review и merge safeguards.
+
 Если master изменился уже после начала задачи, а её worktree содержит только закоммиченные
 изменения, ведущий запускает `python scripts/task.py reconcile ID`. Команда проверяет чистоту
 основного checkout и worktree, делает rebase на целевую ветку и сбрасывает предыдущие seals
