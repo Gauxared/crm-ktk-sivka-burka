@@ -1,0 +1,31 @@
+{
+  "id": "DB-005",
+  "title": "Persist inquiry audit events and owner-notification outbox",
+  "type": "implementation",
+  "status": "BACKLOG",
+  "priority": "high",
+  "executor": {"preferred": "cloud", "fallback": "cloud"},
+  "reviewer": "cloud",
+  "depends_on": ["DB-002", "DB-004", "ARCH-006", "ARCH-007", "ARCH-008"],
+  "allowed_paths": ["alembic/**", "tests/db005/**", "tasks/specs/DB-005.json"],
+  "forbidden_paths": [".env", ".env.*", "apps/**", "tests/integration/**", "docs/**", "packages/**"],
+  "context": ["docs/database.md", "docs/notifications.md", "docs/api.md", "docs/development-pipeline.md"],
+  "requirements": [
+    "Add change_events, event_inquiries, event_visits, notification_recipient_state, notification_jobs and notification_attempts.",
+    "Use UUID keys, receipt linkage, restrictive foreign keys, version/status/lease/check constraints and indexes required for deterministic audit and retry handling.",
+    "Add isolated PostgreSQL migration tests under tests/db005 without altering application code or existing integration-test scope.",
+    "Do not send notifications, create endpoints, store provider secrets, or implement worker retry behavior."
+  ],
+  "acceptance": [
+    "A clean PostgreSQL database reaches the DB-005 head with audit and outbox tables needed by a new inquiry transaction.",
+    "Tests prove one receipt-linked audit event can relate to an inquiry and one notification job can exist without an external send.",
+    "No external recipient, token, provider URL or message content is persisted as a secret."
+  ],
+  "validation": [
+    {"name": "DB-005 PostgreSQL tests", "argv": ["{python}", "-m", "pytest", "tests/db005", "-q"], "timeout": 120},
+    {"name": "whitespace", "argv": ["git", "diff", "--check"], "timeout": 10}
+  ],
+  "risk": "high",
+  "retry_limit": 0,
+  "shared_paths_approval": {"paths": ["alembic/**", "tests/db005/**", "tasks/specs/DB-005.json"], "reviewer": "cloud:codex", "reason": "Accepted audit/outbox transaction dependency before APP-001."}
+}
