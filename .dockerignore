@@ -1,0 +1,9 @@
+.git
+.worktrees
+.pipeline
+.venv
+__pycache__
+*.py[cod]
+.env
+reports
+node_modules

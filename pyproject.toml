@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=80"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sivka-burka-api"
+version = "0.1.0"
+description = "Backend scaffold for the Sivka-Burka booking CRM"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+  "fastapi==0.141.1",
+  "uvicorn==0.52.4",
+  "sqlalchemy==2.0.52",
+  "psycopg[binary]==3.3.5",
+  "alembic==1.20.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest==9.1.1", "httpx==0.28.1"]
+
+[tool.setuptools.packages.find]
+where = ["apps/api"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests/api"]
+pythonpath = ["apps/api"]
+addopts = "-ra"

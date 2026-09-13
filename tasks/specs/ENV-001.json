@@ -1,0 +1,24 @@
+{
+  "id": "ENV-001",
+  "title": "Bootstrap FastAPI and PostgreSQL development environment",
+  "type": "implementation",
+  "status": "BACKLOG",
+  "priority": "high",
+  "executor": {"preferred": "cloud", "fallback": "cloud"},
+  "reviewer": "cloud",
+  "depends_on": ["ARCH-008", "FLOW-001"],
+  "allowed_paths": ["pyproject.toml", "compose.yaml", ".env.example", ".dockerignore", "apps/api/**", "tests/api/**", "docs/development-setup.md", "tasks/specs/ENV-001.json"],
+  "forbidden_paths": [".env", "database/**", "packages/**", "apps/web/**", "apps/bot/**", "apps/admin/**"],
+  "context": ["docs/architecture.md", "docs/database.md", "docs/api.md", "docs/development-pipeline.md"],
+  "requirements": ["Cloud-led FastAPI and PostgreSQL scaffold only; no product feature is implemented."],
+  "acceptance": ["Tests and Compose configuration pass without starting PostgreSQL."],
+  "validation": [
+    {"name": "API unit tests", "argv": ["{python}", "-m", "pytest", "tests/api", "-q"], "timeout": 60},
+    {"name": "compile API", "argv": ["{python}", "-m", "compileall", "-q", "apps/api"], "timeout": 30},
+    {"name": "compose configuration", "argv": ["docker", "compose", "--env-file", ".env.example", "config", "--quiet"], "timeout": 30},
+    {"name": "whitespace", "argv": ["git", "diff", "--check"], "timeout": 10}
+  ],
+  "risk": "high",
+  "retry_limit": 0,
+  "shared_paths_approval": {"paths": ["pyproject.toml", "compose.yaml", ".env.example", ".dockerignore", "apps/api/**", "tests/api/**", "docs/development-setup.md", "tasks/specs/ENV-001.json"], "reviewer": "cloud:codex", "reason": "First cloud-led implementation scaffold authorized by the user after accepted architecture and environment inventory."}
+}
