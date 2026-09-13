@@ -1,69 +1,55 @@
-# Task format v1
+# Шаблон задачи v2
 
-Create one JSON file in tasks/specs. Live status is in .pipeline/state.json. All keys below are required. Validation uses argv arrays, never shell strings; {python} selects the running interpreter. Context is an explicit list of existing UTF-8 files. retry_limit counts extra calls after the first. To modify shared paths add shared_paths_approval with paths, reviewer and reason in a dedicated cloud task.
+Основной исполнитель cloud. Обязанности разработки, QA и review может выполнять один
+ведущий; самопроверка не объявляется независимым review. Все поля ниже обязательны.
+Пример нужно адаптировать к реальному контракту и файлам: example.py и tests/example
+не являются готовой задачей репозитория. Добавить явные зависимости от нужных ARCH/DEV.
 
 ```json
 {
-  "id": "POC-001",
-  "title": "Implement minimal standard-library health API",
+  "id": "DEV-001",
+  "title": "Implement one agreed behavior",
   "type": "implementation",
   "status": "BACKLOG",
   "priority": "high",
   "executor": {
-    "preferred": "local",
+    "preferred": "cloud",
     "fallback": "cloud"
   },
   "reviewer": "cloud",
-  "depends_on": [
-    "PIPE-004"
-  ],
+  "depends_on": [],
   "allowed_paths": [
-    "apps/api/health.py",
-    "tests/poc/test_health_worker.py"
+    "apps/api/example.py",
+    "tests/example/test_example.py"
   ],
   "forbidden_paths": [
-    "tests/poc/test_health_contract.py",
-    "scripts/**",
-    "packages/**",
     ".env*"
   ],
   "context": [
-    "docs/poc-health-contract.md",
-    "tests/poc/test_health_contract.py"
+    "docs/requirements.md"
   ],
   "requirements": [
-    "Implement exactly the supplied approved health contract",
-    "Add worker-owned unittest tests; do not edit independent lead tests",
-    "Use only standard library; no dependencies or business features"
+    "Replace this example with one concrete accepted behavior and its contract"
   ],
   "acceptance": [
-    "Requirements satisfied; validation passes; cloud review PASS"
+    "Observable behavior and meaningful negative cases pass review"
   ],
   "validation": [
     {
-      "name": "unit and HTTP contract tests",
+      "name": "behavior tests",
       "argv": [
         "{python}",
         "-m",
         "unittest",
         "discover",
         "-s",
-        "tests/poc",
+        "tests/example",
         "-v"
       ],
       "timeout": 30
     },
     {
-      "name": "syntax",
-      "argv": [
-        "{python}",
-        "-c",
-        "from pathlib import Path; [compile(p.read_text(encoding='utf-8'), str(p), 'exec') for p in [Path('apps/api/health.py'), Path('tests/poc/test_health_worker.py')]]"
-      ],
-      "timeout": 10
-    },
-    {
-      "name": "diff whitespace",
+      "name": "whitespace",
       "argv": [
         "git",
         "diff",
@@ -72,7 +58,22 @@ Create one JSON file in tasks/specs. Live status is in .pipeline/state.json. All
       "timeout": 10
     }
   ],
-  "risk": "low",
-  "retry_limit": 1
+  "risk": "medium",
+  "retry_limit": 0
 }
 ```
+
+Спецификация хранится в tasks/specs, live status — в .pipeline/state.json. Регистрация
+копирует spec, последующее редактирование файла не меняет уже зарегистрированную задачу.
+Команды проверок — argv, не shell-текст; {python} — текущий интерпретатор. Context содержит
+только нужные существующие файлы. Разрешённые пути должны соответствовать точному результату.
+
+Для общего кода/конфигурации добавить shared_paths_approval с paths, reviewer, reason
+в dedicated cloud task. Это фиксация scope ведущим, не дополнительный запрос пользователя,
+если изменение уже входит в его поручение. Исторические спецификации не переписываются.
+
+Для отдельного локального эксперимента явно поставить preferred=local, retry_limit=0
+на первом сравнительном прогоне, указать гипотезу, входные данные, критерии и профиль.
+Запуск: run ID --experimental-local. Этот флаг не переключает облачную задачу в local.
+После неудачи не увеличивать лимиты тайно: сохранить результат и решить, нужен ли новый
+эксперимент или handoff. Производственная задача не зависит от успеха такого эксперимента.

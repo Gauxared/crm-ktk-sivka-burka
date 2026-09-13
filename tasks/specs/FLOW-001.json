@@ -1,0 +1,108 @@
+{
+  "id": "FLOW-001",
+  "title": "Make cloud development primary and local workers opt-in experiments",
+  "type": "infrastructure",
+  "status": "BACKLOG",
+  "priority": "high",
+  "executor": {
+    "preferred": "cloud",
+    "fallback": "cloud"
+  },
+  "reviewer": "cloud",
+  "depends_on": [
+    "ARCH-007"
+  ],
+  "allowed_paths": [
+    "AGENTS.md",
+    "README.md",
+    "docs/development-pipeline.md",
+    "docs/agent-responsibilities.md",
+    "docs/task-lifecycle.md",
+    "docs/local-model.md",
+    "docs/model-selection-guide.md",
+    "agents/architect.md",
+    "agents/reviewer.md",
+    "agents/qa.md",
+    "agents/local-worker.md",
+    "agents/developer.md",
+    "tasks/TASK_TEMPLATE.md",
+    "tasks/specs/FLOW-001.json",
+    "scripts/task.py",
+    "tests/pipeline/test_pipeline.py"
+  ],
+  "forbidden_paths": [],
+  "context": [
+    "docs/development-pipeline.md"
+  ],
+  "requirements": [
+    "Cloud is primary implementer; roles are responsibilities not mandatory separate agents.",
+    "Cloud task run must work without local configuration or inference; local run requires explicit experiment opt-in.",
+    "Remove obsolete local POC product gate; preserve explicit task dependencies and all scope/review seals.",
+    "Update current guidance without rewriting historical evidence or accepted business architecture."
+  ],
+  "acceptance": [
+    "Pipeline tests pass with cloud-only lifecycle and explicit local opt-in regression coverage",
+    "Docs and template consistently default to cloud, no unproven local savings claims"
+  ],
+  "validation": [
+    {
+      "name": "pipeline regressions",
+      "argv": [
+        "{python}",
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        "tests/pipeline",
+        "-v"
+      ],
+      "timeout": 90
+    },
+    {
+      "name": "health regressions",
+      "argv": [
+        "{python}",
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        "tests/poc",
+        "-v"
+      ],
+      "timeout": 30
+    },
+    {
+      "name": "whitespace",
+      "argv": [
+        "git",
+        "diff",
+        "--check"
+      ],
+      "timeout": 10
+    }
+  ],
+  "risk": "high",
+  "retry_limit": 0,
+  "shared_paths_approval": {
+    "paths": [
+      "AGENTS.md",
+      "README.md",
+      "docs/development-pipeline.md",
+      "docs/agent-responsibilities.md",
+      "docs/task-lifecycle.md",
+      "docs/local-model.md",
+      "docs/model-selection-guide.md",
+      "agents/architect.md",
+      "agents/reviewer.md",
+      "agents/qa.md",
+      "agents/local-worker.md",
+      "agents/developer.md",
+      "tasks/TASK_TEMPLATE.md",
+      "tasks/specs/FLOW-001.json",
+      "scripts/task.py",
+      "tests/pipeline/test_pipeline.py"
+    ],
+    "reviewer": "cloud:codex",
+    "reason": "User explicitly requested redesign of repository development roles and worker workflow."
+  }
+}

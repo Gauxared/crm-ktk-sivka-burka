@@ -105,8 +105,6 @@ class Pipeline:
         r = self.get(task_id)
         require(r['state'] == 'READY', 'Task must be READY')
         self.deps(r['task'])
-        if not task_id.startswith(('PIPE-', 'POC-')):
-            require(self.state['tasks'].get('PIPE-005', {}).get('state') == 'DONE', 'Product gate: PIPE-005 is not DONE')
         self.clean_root()
         for other in self.state['tasks'].values():
             if other['worktree'] and other['state'] != 'DONE':
@@ -127,10 +125,12 @@ class Pipeline:
     def feedback(self, r):
         return {'review': r.get('review'), 'validation': r.get('validation'), 'blocker': r.get('blocker')}
 
-    def run(self, task_id):
+    def run(self, task_id, experimental_local=False):
         r = self.get(task_id)
-        require(r['state'] == 'ACTIVE', 'Local run requires ACTIVE')
-        require(r['executor'] == 'local', 'Task belongs to cloud; use handoff')
+        require(r['state'] == 'ACTIVE', 'Run requires ACTIVE')
+        if r['executor'] == 'cloud':
+            return self.handoff(task_id)
+        require(experimental_local, 'Local execution is experimental; use run ID --experimental-local or handoff ID')
         if r['attempts'] >= 1 + r['task']['retry_limit']:
             r.update(state='BLOCKED', blocker='Local attempt limit reached; escalate to cloud')
             self.event(r, 'escalated', reason=r['blocker'])
@@ -287,8 +287,12 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest='command', required=True)
     sub.add_parser('create').add_argument('spec')
-    for name in ('ready', 'start', 'run', 'validate', 'finish', 'cleanup', 'handoff'):
+    for name in ('ready', 'start', 'validate', 'finish', 'cleanup', 'handoff'):
         sub.add_parser(name).add_argument('id')
+    run = sub.add_parser('run')
+    run.add_argument('id')
+    run.add_argument('--experimental-local', action='store_true',
+                     help='Explicitly opt into one bounded local generation experiment')
     status = sub.add_parser('status')
     status.add_argument('id', nargs='?')
     review = sub.add_parser('review')
@@ -313,6 +317,8 @@ def main():
                 result = pipeline.review(args.id, args.file)
             elif args.command == 'resume':
                 result = pipeline.resume(args.id, args.reason)
+            elif args.command == 'run':
+                result = pipeline.run(args.id, experimental_local=args.experimental_local)
             else:
                 result = getattr(pipeline, args.command)(args.id)
             print(json.dumps(result if result is not None else {'status': 'ok'}, ensure_ascii=False, indent=2))

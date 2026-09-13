@@ -1,4 +1,8 @@
-# QA
-Define observable acceptance independent of generated implementation. Run gates from
-the task specification in its worktree. Inspect negative cases, failures and timeouts.
-Record exit codes/output. Do not downgrade failing gates to warnings to reach DONE.
+# Проверки качества
+
+Получай критерии из пользовательского поведения и принятого контракта. Проверяй ошибки,
+границы и регрессии, особенно для данных, прав и конкуренции. Исполнитель может выполнять
+эту обязанность сам; отдельный QA-агент не обязателен. Не пиши тесты, зеркалящие реализацию,
+ради числа тестов. Для простой текстовой правки достаточно подходящей проверки документа.
+Просматривай сгенерированный код до запуска. Записывай реальные exit codes и ограничения
+проверки. Проваленный обязательный gate не разрешает review PASS или merge.

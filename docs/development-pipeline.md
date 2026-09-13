@@ -1,34 +1,70 @@
-# Development pipeline
+# Процесс разработки v2
 
-Version 1 is a semi-automatic, local development tool, not a production sandbox.
-Lead defines contracts/tasks; runner creates a worktree; local model proposes files;
-runner applies only permitted paths; lead runs validation, reviews, merges, cleans up.
-PIPE-001 through PIPE-005 precede all product work. PIPE-005 requires actual local
-generation and a reviewed, tested, merged POC. ARCH tasks stay BACKLOG until then.
+Версия 2 · 2026-09-13. Основной исполнитель продукта — облачная модель в Codex.
+Цель процесса — принятый работающий результат с разумной стоимостью проверки.
+Локальная генерация не является обязательным этапом, критерием прогресса или резервом,
+который надо обязательно задействовать. Выигрыш от неё пока не измерен.
 
-Task definitions are versioned JSON in tasks/specs. Live lifecycle is centralized in
-.pipeline/state.json (ignored): this avoids six duplicate task folders and prevents
-operational state changes from dirtying the integration checkout during merges.
-Each task record stores the full approved specification, owner, base commit, branch,
-worktree, attempts, retries, review, blockers, history and UTC timestamps.
-Reports and prompts live in ignored reports/runs; copy selected non-secret evidence
-to reports/evidence for durable Git history. Git is the source of truth for code.
+## Основной цикл
 
-The controller holds an exclusive lock for each command, including inference/checks.
-One controller at a time; several isolated worktrees may exist. Conflicting write
-scopes are rejected conservatively. This version favors correctness over throughput.
-One local request at a time matches the configured parallel=1 server.
-The worker has no shell, network, Git, deployment or production credentials.
-The lead supplies explicit source/context files; no recursive repository upload.
-The runner executes only validation argv arrays from the lead-approved specification.
-Generated code must be inspected before validation: tests run under your OS account.
+1. Ведущий проверяет требования, существующий код и границы конкретного результата.
+2. Оформляет задачу с executor.preferred=cloud, зависимостями, allowed_paths и проверками.
+3. Центральный runner создаёт изолированный worktree. Ведущий реализует изменение напрямую
+   инструментами Codex; JSON с полными файлами для облачного исполнителя не нужен.
+4. Выполняются проверки, соответствующие риску. Исполнитель исправляет дефекты до приёмки.
+5. Review фактического diff и результатов, затем validate/review/finish/cleanup.
+   При изменении после validation необходим новый validation и новый review.
 
-No installation, hosted services, CI service or cloud credentials are required.
-Run the infrastructure test suite locally before integrating runner changes.
+`run ID` для облачной задачи готовит контекст и путь worktree, не вызывает модель API,
+не читает локальную .env и не требует TurboLLM. Ведущий уже работает в задаче Codex.
+`handoff ID` также переводит незавершённую локальную задачу облачному исполнителю.
 
-Genesis exception: PIPE-001..004 are built and reviewed by the lead in the initially
-empty primary checkout, because isolation and validation do not exist beforehand.
-scripts/accept_bootstrap.py records a cloud attestation referencing the current clean
-commit and tracked evidence. It accepts only PIPE-001..005, enforces dependencies,
-and additionally requires local generation, merged POC-001 and cleanup for PIPE-005.
-It cannot close normal product tasks. The full worktree lifecycle is proved by POC-001.
+Роли — обязанности, их может выполнять один агент с явной самопроверкой. Для сложных
+контрактов, авторизации и конкурентных операций нужна более глубокая проверка и негативные
+сценарии; самопроверка не называется независимым review. Дополнительный агент не запускается
+автоматически. Формальная подпись review не заменяет проверок и не гарантирует отсутствие ошибок.
+
+## Что сохраняем от pipeline v1
+
+Центральный контроллер, блокировку от параллельных запусков, worktrees, контроль scope,
+версии snapshot, журнал ошибок, проверки перед merge. История PIPE/POC остаётся доказательством
+прошлых экспериментов. Завершение PIPE-005 больше не является неявным условием start.
+Явные depends_on каждой задачи по-прежнему обязательны; принятую архитектуру обходить нельзя.
+Первоначальные ARCH-001–007 завершены; бизнес-контракты этой переработкой не меняются.
+
+Спецификации задач версионируются в tasks/specs; live state — ignored .pipeline/state.json.
+Для задачи изменения процесса начальный spec может быть подготовлен в reports/runs,
+зарегистрирован контроллером и внесён в tasks/specs в её worktree с разрешённым shared scope.
+Сохранённые первоначальные спецификации не переписываются ради новой истории.
+Новый клон сам по себе не восстанавливает live state: readme/коммиты и архивные отчёты
+не должны выдаваться за восстановленное состояние контроллера.
+
+## Необязательный локальный эксперимент
+
+Нужна отдельная гипотеза: например, уменьшает ли модель время подготовки однотипных файлов.
+Задача содержит ограниченный scope, явный model/profile, критерии качества и бюджет попыток.
+executor.preferred=local не запускает модель автоматически: нужна команда
+`python scripts/task.py run ID --experimental-local`. Без флага отказ до чтения локальной
+конфигурации и увеличения счётчика попыток. Один локальный запрос одновременно.
+
+Нынешний адаптер остаётся экспериментальным: возвращает JSON с текстами файлов.
+Он не получил гарантированного structured output и не исправляет повреждённый JSON автоматически.
+Ошибки конверта и ошибки кода учитываются раздельно. Нет обязанности восстанавливать
+ответ вручную или тратить бюджет продукта на настройку модели. После установленного
+retry_limit эксперимент останавливается; handoff в облако — осмысленное решение ведущего.
+
+Локальный worker не получает shell, Git, secrets, deployment или production-данные.
+Код просматривается до исполнения: тесты работают под аккаунтом разработчика, OS sandbox нет.
+Настройки серверов, загрузка других моделей и установка зависимостей — отдельные действия.
+Не переносить гипотезу об экономии на реальный проект без измерения.
+
+## Критерий полезности
+
+Измерять полное время до принятого результата: подготовка контекста + генерация + review +
+исправления + проверки. Отдельно — облачные затраты ведущего и проверяющего, доля приёмки
+с первой попытки и причины отказов. Tok/s — вспомогательная метрика.
+Если выигрыш не показан на нескольких сопоставимых задачах, продукт продолжает облачный
+исполнитель. Производственная CRM не нуждается в LLM для заявок, календаря и уведомлений.
+
+Контроллер не обращается к платному облачному API. Версия процесса не включает автоматический
+маршрутизатор моделей, новые агенты, hosting или CI-сервис. Публикация требует отдельного запроса.
