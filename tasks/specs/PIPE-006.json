@@ -1,0 +1,34 @@
+{
+  "id": "PIPE-006",
+  "title": "Permit synthetic environment templates in the task pipeline",
+  "type": "implementation",
+  "status": "BACKLOG",
+  "priority": "high",
+  "executor": {"preferred": "cloud", "fallback": "cloud"},
+  "reviewer": "cloud",
+  "depends_on": ["FLOW-001"],
+  "allowed_paths": ["scripts/policy.py", "tests/pipeline/test_pipeline.py", "docs/development-pipeline.md", "tasks/specs/PIPE-006.json"],
+  "forbidden_paths": [".env", ".env.*", "**/.env", "**/.env.*"],
+  "context": ["scripts/policy.py", "tests/pipeline/test_pipeline.py", "docs/development-pipeline.md"],
+  "requirements": [
+    "Preserve rejection of real environment files and secret-like paths, while allowing the exact synthetic template name .env.example when it is explicitly inside the task allowed_paths.",
+    "Add regression coverage for the allowed .env.example case and for rejection of .env, .env.local, nested environment files, and a template outside allowed_paths.",
+    "Document the narrow exception so a template is never treated as a credential source or context file."
+  ],
+  "acceptance": [
+    "A task explicitly allowing .env.example can pass scope validation for that synthetic template.",
+    "Real .env files and secret-like files remain rejected by the policy tests.",
+    "The full pipeline test suite passes."
+  ],
+  "validation": [
+    {"name": "pipeline tests", "argv": ["{python}", "-m", "pytest", "tests/pipeline", "-q"], "timeout": 60},
+    {"name": "whitespace", "argv": ["git", "diff", "--check"], "timeout": 10}
+  ],
+  "risk": "high",
+  "retry_limit": 0,
+  "shared_paths_approval": {
+    "paths": ["scripts/policy.py", "tests/pipeline/test_pipeline.py", "docs/development-pipeline.md", "tasks/specs/PIPE-006.json"],
+    "reviewer": "cloud:codex",
+    "reason": "The pipeline policy currently contradicts the accepted ENV-001 contract; this narrowly restores support for a synthetic template without permitting local credentials."
+  }
+}

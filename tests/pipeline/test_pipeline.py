@@ -43,6 +43,20 @@ class PolicyTests(unittest.TestCase):
         task['shared_paths_approval'] = {'paths': ['packages/contracts/**'], 'reviewer': 'cloud:lead', 'reason': 'Dedicated schema task'}
         check_scope(task, ['packages/contracts/api.json'])
 
+    def test_synthetic_environment_template_requires_explicit_scope(self):
+        task = spec()
+        task['allowed_paths'] = ['.env.example']
+        task['forbidden_paths'] = []
+        check_scope(task, ['.env.example'])
+
+        for path in ['.env', '.env.local', 'config/.env', 'config/.env.example']:
+            with self.subTest(path=path), self.assertRaises(PipelineError):
+                check_scope(task, [path])
+
+        task['allowed_paths'] = ['apps/api/**']
+        with self.assertRaises(PipelineError):
+            check_scope(task, ['.env.example'])
+
     def test_overlap_conservative(self):
         self.assertTrue(scopes_overlap(['apps/**'], ['apps/api/a.py']))
         self.assertTrue(scopes_overlap(['apps/w*'], ['apps/web/**']))

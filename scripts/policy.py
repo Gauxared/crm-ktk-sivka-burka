@@ -62,6 +62,11 @@ SECRETS = ['.env', '.env.*', '**/.env', '**/.env.*', '*.pem', '*.key',
            '**/credentials*', '**/secrets*']
 
 
+def is_explicit_env_template(task, path):
+    """Permit the one synthetic template name only when its task scope names it."""
+    return path == '.env.example' and matches(path, task['allowed_paths'])
+
+
 def check_scope(task, paths):
     approval = task.get('shared_paths_approval', {})
     approved = approval.get('paths', []) if approval.get('reviewer') and approval.get('reason') else []
@@ -70,7 +75,8 @@ def check_scope(task, paths):
         parts = PurePosixPath(path.lower()).parts
         require(not any(x in ('.git', '.pipeline', '.worktrees') for x in parts),
                 f'Controller metadata denied: {path}')
-        require(not matches(path, SECRETS), f'Secret-like path denied: {path}')
+        require(not matches(path, SECRETS) or is_explicit_env_template(task, path),
+                f'Secret-like path denied: {path}')
         require(matches(path, task['allowed_paths']), f'Outside allowed_paths: {path}')
         require(not matches(path, task['forbidden_paths']), f'Forbidden path: {path}')
         require(not matches(path, SHARED) or matches(path, approved),
