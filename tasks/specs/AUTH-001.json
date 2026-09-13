@@ -1,0 +1,35 @@
+{
+  "id": "AUTH-001",
+  "title": "Expose owner session API with server-side revocation and CSRF protection",
+  "type": "implementation",
+  "status": "BACKLOG",
+  "priority": "high",
+  "executor": {"preferred": "cloud", "fallback": "cloud"},
+  "reviewer": "cloud",
+  "depends_on": ["DB-006", "TEST-002", "PIPE-008"],
+  "allowed_paths": ["apps/api/sivka_burka_api/main.py", "apps/api/sivka_burka_api/admin_sessions.py", "tests/api/test_admin_session_routes.py", "tests/integration/test_admin_session_api.py", "tasks/specs/AUTH-001.json"],
+  "forbidden_paths": [".env", ".env.*", "alembic/**", "apps/web/**", "apps/bots/**", "packages/**", "docs/**", "pyproject.toml"],
+  "context": ["AGENTS.md", "docs/development-pipeline.md", "docs/api.md", "docs/database.md", "apps/api/sivka_burka_api/main.py", "apps/api/sivka_burka_api/public_submission.py", "tests/db006/test_owner_accounts_sessions.py"],
+  "requirements": [
+    "Implement POST, GET and DELETE /api/v1/admin/session from the accepted API contract, using only DB-006 owner/session tables and an explicitly injected AdminSessionRuntime. Missing runtime dependencies must fail closed with a stable 503 response.",
+    "Authenticate a pre-provisioned non-disabled owner by a versioned, self-describing hashlib.scrypt password hash with a per-password random salt and timing-safe verification. Return the same private 401 result for unknown login, disabled account, invalid password or malformed stored hash; do not add account bootstrap, registration, reset or password-change behavior.",
+    "On successful login, rotate to a cryptographically random opaque cookie token, persist only its HMAC digest, issue a distinct CSRF token, persist session metadata, and return owner_id, csrf_token and expires_at. The cookie is Secure, HttpOnly, SameSite=Lax, Path=/, has no Domain attribute, and raw cookie values are never logged or stored.",
+    "Enforce a runtime-injected login-attempt limiter and a runtime-injected positive session lifetime policy; no default quota, origin allowlist or production lifetime is invented. Limiter rejection returns 429 without revealing credential state.",
+    "Require trusted exact Origin, application/json and X-Requested-With: crm for login. Every session read or sign-out verifies the server-side record, expiry, revocation, owner disabled marker and matching credentials_version. Sign-out also requires trusted Origin and a timing-safe X-CSRF-Token check, then records revoked_at instead of deleting history.",
+    "Return the documented {data}/{error} envelope with Cache-Control: no-store; do not enable CORS, disclose other owner fields, add CRM commands, configure production runtime, or contact an external identity provider.",
+    "Add focused API tests and PostgreSQL integration tests in uniquely named disposable databases. Tests must migrate Alembic head there, clean up in finally, and never mutate the configured source DATABASE_URL."
+  ],
+  "acceptance": [
+    "A configured synthetic runtime logs in only the provisioned owner, emits a protected cookie and digest-only session record, and GET returns the documented private session data.",
+    "Malformed, untrusted-origin, wrong-media, missing-header, invalid-password, disabled-owner, expired, revoked, credential-version-mismatched and invalid-CSRF scenarios receive safe stable errors without exposing login existence or creating an active session.",
+    "Sign-out revokes the existing server-side session and later GET cannot restore it. Focused API/integration tests, scope and whitespace checks pass."
+  ],
+  "validation": [
+    {"name": "API tests", "argv": ["{python}", "-m", "pytest", "tests/api", "-q"], "timeout": 180},
+    {"name": "admin session integration tests", "argv": ["{python}", "-m", "pytest", "tests/integration/test_admin_session_api.py", "-q"], "timeout": 180},
+    {"name": "whitespace", "argv": ["git", "diff", "--check"], "timeout": 10}
+  ],
+  "risk": "high",
+  "retry_limit": 0,
+  "shared_paths_approval": {"paths": ["apps/api/sivka_burka_api/main.py", "apps/api/sivka_burka_api/admin_sessions.py", "tests/api/test_admin_session_routes.py", "tests/integration/test_admin_session_api.py", "tasks/specs/AUTH-001.json"], "reviewer": "cloud:codex", "reason": "Accepted security-sensitive vertical slice over DB-006 storage. The task deliberately uses injected policy and pre-provisioned synthetic accounts rather than creating a deployment credential flow."}
+}
