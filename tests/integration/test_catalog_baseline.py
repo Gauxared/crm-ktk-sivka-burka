@@ -1,4 +1,4 @@
-"""PostgreSQL-only checks for the catalog and inquiry Alembic baselines."""
+"""PostgreSQL-only checks for the catalog, inquiry and visit Alembic baselines."""
 
 from __future__ import annotations
 
@@ -204,4 +204,81 @@ def test_inquiries_keep_contact_snapshot_and_reject_invalid_terms(upgraded_datab
                         (id, service_id, code, duration_minutes, pricing_mode, price_minor, currency, active)
                         VALUES (:id, :service_id, 'broken-negotiated', NULL, 'NEGOTIATED', 100, 'RUB', true)"""),
                 {"id": uuid4(), "service_id": service_id},
+            )
+
+
+def test_one_shared_visit_accepts_independent_inquiries_and_rejects_invalid_participations(upgraded_database):
+    service_id = uuid4()
+    option_id = uuid4()
+    contact_ids = [uuid4(), uuid4()]
+    inquiry_ids = [uuid4(), uuid4(), uuid4()]
+    visit_id = uuid4()
+    with upgraded_database.begin() as connection:
+        connection.execute(
+            text("""INSERT INTO services (id, code, title, description, information, active, sort_order)
+                    VALUES (:id, 'shared-ride', 'Shared ride', '', '', true, 30)"""),
+            {"id": service_id},
+        )
+        connection.execute(
+            text("""INSERT INTO service_options
+                    (id, service_id, code, duration_minutes, pricing_mode, price_minor, currency, active)
+                    VALUES (:id, :service_id, 'shared-60', 60, 'FIXED_PER_PERSON', 350000, 'RUB', true)"""),
+            {"id": option_id, "service_id": service_id},
+        )
+        for contact_id in contact_ids:
+            connection.execute(text("INSERT INTO contact_cards (id) VALUES (:id)"), {"id": contact_id})
+        for index, inquiry_id in enumerate(inquiry_ids):
+            connection.execute(
+                text("""INSERT INTO inquiries
+                        (id, contact_id, source_kind, status, contact_snapshot, selection_snapshot,
+                         requester_name, contact_kind, contact_value)
+                        VALUES (:id, :contact_id, 'PHONE', 'NEW', '{}'::jsonb, '{}'::jsonb,
+                                :name, 'PHONE', :contact_value)"""),
+                {"id": inquiry_id, "contact_id": contact_ids[index % 2], "name": f"Client {index}", "contact_value": f"+7000000000{index}"},
+            )
+            connection.execute(
+                text("""INSERT INTO inquiry_terms (inquiry_id, service_option_id, participants_count, currency)
+                        VALUES (:inquiry_id, :option_id, 1, 'RUB')"""),
+                {"inquiry_id": inquiry_id, "option_id": option_id},
+            )
+        connection.execute(
+            text("""INSERT INTO visits (id, service_id, status, start_at, duration_minutes)
+                    VALUES (:id, :service_id, 'PLANNED', now() + interval '1 day', 60)"""),
+            {"id": visit_id, "service_id": service_id},
+        )
+        for inquiry_id in inquiry_ids[:2]:
+            connection.execute(
+                text("INSERT INTO visit_participations (id, inquiry_id, visit_id) VALUES (:id, :inquiry_id, :visit_id)"),
+                {"id": uuid4(), "inquiry_id": inquiry_id, "visit_id": visit_id},
+            )
+
+    with upgraded_database.connect() as connection:
+        count = connection.execute(
+            text("SELECT count(*) FROM visit_participations WHERE visit_id = :visit_id AND closed_at IS NULL"),
+            {"visit_id": visit_id},
+        ).scalar_one()
+    assert count == 2
+
+    with pytest.raises(IntegrityError, match="one_active_participation_per_inquiry"):
+        with upgraded_database.begin() as connection:
+            connection.execute(
+                text("INSERT INTO visit_participations (id, inquiry_id, visit_id) VALUES (:id, :inquiry_id, :visit_id)"),
+                {"id": uuid4(), "inquiry_id": inquiry_ids[0], "visit_id": visit_id},
+            )
+
+    with pytest.raises(IntegrityError, match="visit_participations_closed_snapshots"):
+        with upgraded_database.begin() as connection:
+            connection.execute(
+                text("""INSERT INTO visit_participations (id, inquiry_id, visit_id, joined_at, closed_at, close_kind)
+                        VALUES (:id, :inquiry_id, :visit_id, now() - interval '1 hour', now(), 'PROVIDED')"""),
+                {"id": uuid4(), "inquiry_id": inquiry_ids[2], "visit_id": visit_id},
+            )
+
+    with pytest.raises(IntegrityError, match="visit_participations_completion_void"):
+        with upgraded_database.begin() as connection:
+            connection.execute(
+                text("""INSERT INTO visit_participations
+                        (id, inquiry_id, visit_id, completion_voided_at, completion_void_reason)
+                        VALUES (:id, :inquiry_id, :visit_id, now(), 'invalid active correction')"""),
+                {"id": uuid4(), "inquiry_id": inquiry_ids[2], "visit_id": visit_id},
             )

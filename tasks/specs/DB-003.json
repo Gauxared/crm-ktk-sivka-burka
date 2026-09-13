@@ -1,0 +1,19 @@
+{
+  "id": "DB-003",
+  "title": "Persist shared visits and inquiry participations",
+  "type": "implementation",
+  "status": "BACKLOG",
+  "priority": "high",
+  "executor": {"preferred": "cloud", "fallback": "cloud"},
+  "reviewer": "cloud",
+  "depends_on": ["DB-002", "ARCH-004", "ARCH-005", "ARCH-006"],
+  "allowed_paths": ["alembic/**", "tests/integration/**", "docs/development-setup.md", "tasks/specs/DB-003.json"],
+  "forbidden_paths": [".env", ".env.*", "apps/api/sivka_burka_api/main.py", "apps/web/**", "apps/bot/**", "apps/admin/**", "packages/**"],
+  "context": ["docs/database.md", "docs/domain-model.md", "docs/api.md", "docs/development-pipeline.md"],
+  "requirements": ["Add an Alembic revision for visits and visit_participations with accepted statuses, UUID keys, versions, duration representation, snapshot fields, closure fields and foreign keys.", "Create the partial unique index that permits at most one active participation per inquiry and database constraints that couple closed_at, close_kind and completion-correction fields.", "Cover in PostgreSQL integration tests one shared visit with two independent inquiries, rejection of a second active participation, and invalid closure/completion states.", "Do not add commands, calendar HTTP endpoints, owner authentication, money records or customer notifications."],
+  "acceptance": ["A clean database reaches the DB-003 Alembic head with all previous baseline tables intact.", "The database permits two independent inquiries in one visit while retaining separate inquiry terms.", "No business transition is externally callable."],
+  "validation": [{"name": "API unit tests", "argv": ["{python}", "-m", "pytest", "tests/api", "-q"], "timeout": 60}, {"name": "PostgreSQL integration tests", "argv": ["{python}", "-m", "pytest", "tests/integration", "-q"], "timeout": 120}, {"name": "Alembic current", "argv": ["{python}", "-m", "alembic", "-c", "alembic.ini", "current"], "timeout": 30}, {"name": "whitespace", "argv": ["git", "diff", "--check"], "timeout": 10}],
+  "risk": "high",
+  "retry_limit": 0,
+  "shared_paths_approval": {"paths": ["alembic/**", "tests/integration/**", "docs/development-setup.md", "tasks/specs/DB-003.json"], "reviewer": "cloud:codex", "reason": "The user requested a larger continuous implementation iteration; DB-003 continues the accepted shared-visit schema without exposing workflow behavior."}
+}
