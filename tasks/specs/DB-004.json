@@ -1,0 +1,19 @@
+{
+  "id": "DB-004",
+  "title": "Persist idempotency receipts and channel event identity",
+  "type": "implementation",
+  "status": "BACKLOG",
+  "priority": "high",
+  "executor": {"preferred": "cloud", "fallback": "cloud"},
+  "reviewer": "cloud",
+  "depends_on": ["DB-002", "DB-003", "ARCH-005", "ARCH-006"],
+  "allowed_paths": ["alembic/**", "tests/integration/**", "docs/development-setup.md", "tasks/specs/DB-004.json"],
+  "forbidden_paths": [".env", ".env.*", "apps/api/sivka_burka_api/main.py", "apps/web/**", "apps/bot/**", "apps/admin/**", "packages/**"],
+  "context": ["docs/database.md", "docs/api.md", "docs/development-pipeline.md"],
+  "requirements": ["Add one Alembic revision for operation_receipts, submission_tokens, receipt_inquiries, channel_events and conversation_drafts with the accepted digest, scope, receipt, expiry, version and uniqueness semantics.", "Persist digests only; do not add HMAC secrets, raw idempotency keys, raw bot events, endpoint handlers or retry logic.", "Cover duplicate receipt/event rejection, one-token-to-one-receipt behavior and the partial uniqueness of an open conversation draft in PostgreSQL integration tests.", "Do not add public submission, bot adapter, owner session, command execution, notification delivery or audit history behavior."],
+  "acceptance": ["A clean database reaches the DB-004 Alembic head with prior schema intact.", "The database rejects repeated receipt identity, repeated channel event identity and a second open draft for the same channel conversation.", "No raw secret or external message payload enters the database schema or repository."],
+  "validation": [{"name": "API unit tests", "argv": ["{python}", "-m", "pytest", "tests/api", "-q"], "timeout": 60}, {"name": "PostgreSQL integration tests", "argv": ["{python}", "-m", "pytest", "tests/integration", "-q"], "timeout": 120}, {"name": "Alembic current", "argv": ["{python}", "-m", "alembic", "-c", "alembic.ini", "current"], "timeout": 30}, {"name": "whitespace", "argv": ["git", "diff", "--check"], "timeout": 10}],
+  "risk": "high",
+  "retry_limit": 0,
+  "shared_paths_approval": {"paths": ["alembic/**", "tests/integration/**", "docs/development-setup.md", "tasks/specs/DB-004.json"], "reviewer": "cloud:codex", "reason": "The user requested continuous larger iterations; idempotency persistence is a prerequisite for safely exposing the first write endpoint."}
+}

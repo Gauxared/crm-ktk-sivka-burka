@@ -1,4 +1,4 @@
-"""PostgreSQL-only checks for the catalog, inquiry and visit Alembic baselines."""
+"""PostgreSQL-only checks for the catalog, inquiry, visit and idempotency baselines."""
 
 from __future__ import annotations
 
@@ -281,4 +281,83 @@ def test_one_shared_visit_accepts_independent_inquiries_and_rejects_invalid_part
                         (id, inquiry_id, visit_id, completion_voided_at, completion_void_reason)
                         VALUES (:id, :inquiry_id, :visit_id, now(), 'invalid active correction')"""),
                 {"id": uuid4(), "inquiry_id": inquiry_ids[2], "visit_id": visit_id},
+            )
+
+
+def test_idempotency_and_channel_identity_constraints(upgraded_database):
+    receipt_id = uuid4()
+    contact_id = uuid4()
+    identity_id = uuid4()
+    with upgraded_database.begin() as connection:
+        connection.execute(
+            text("""INSERT INTO operation_receipts
+                    (id, scope_kind, scope_id, method, canonical_path, key_digest, payload_digest,
+                     digest_key_version, normalization_version, result_json)
+                    VALUES (:id, 'PUBLIC_FORM', 'PUBLIC_FORM', 'POST', '/api/v1/public/inquiries',
+                            :key_digest, :payload_digest, 1, 1, '{}'::jsonb)"""),
+            {"id": receipt_id, "key_digest": b"receipt-key", "payload_digest": b"payload"},
+        )
+        connection.execute(text("INSERT INTO contact_cards (id) VALUES (:id)"), {"id": contact_id})
+        connection.execute(
+            text("""INSERT INTO channel_identities (id, contact_id, platform, integration_id, external_sender_id)
+                    VALUES (:id, :contact_id, 'VK', 'test-group', 'sender-44')"""),
+            {"id": identity_id, "contact_id": contact_id},
+        )
+        connection.execute(
+            text("""INSERT INTO submission_tokens
+                    (token_digest, digest_key_version, expires_at, used_receipt_id, consumed_at)
+                    VALUES (:digest, 1, now() + interval '1 hour', :receipt_id, now())"""),
+            {"digest": b"submission-token", "receipt_id": receipt_id},
+        )
+        connection.execute(
+            text("""INSERT INTO channel_events
+                    (id, platform, integration_id, event_key_digest, dialog_key_digest,
+                     digest_key_version, outcome_kind, receipt_id)
+                    VALUES (:id, 'VK', 'test-group', :event_digest, :dialog_digest, 1, 'DRAFT_UPDATED', :receipt_id)"""),
+            {"id": uuid4(), "event_digest": b"event-1", "dialog_digest": b"dialog-1", "receipt_id": receipt_id},
+        )
+        connection.execute(
+            text("""INSERT INTO conversation_drafts
+                    (id, channel_identity_id, conversation_id, version, answers, step, expires_at)
+                    VALUES (:id, :identity_id, 'conversation-1', 1, '{}'::jsonb, 'SERVICE', now() + interval '1 hour')"""),
+            {"id": uuid4(), "identity_id": identity_id},
+        )
+
+    with pytest.raises(IntegrityError, match="operation_receipts_identity_key"):
+        with upgraded_database.begin() as connection:
+            connection.execute(
+                text("""INSERT INTO operation_receipts
+                        (id, scope_kind, scope_id, method, canonical_path, key_digest, payload_digest,
+                         digest_key_version, normalization_version, result_json)
+                        VALUES (:id, 'PUBLIC_FORM', 'PUBLIC_FORM', 'POST', '/api/v1/public/inquiries',
+                                :key_digest, :payload_digest, 1, 1, '{}'::jsonb)"""),
+                {"id": uuid4(), "key_digest": b"receipt-key", "payload_digest": b"other"},
+            )
+
+    with pytest.raises(IntegrityError, match="channel_events_identity_key"):
+        with upgraded_database.begin() as connection:
+            connection.execute(
+                text("""INSERT INTO channel_events
+                        (id, platform, integration_id, event_key_digest, dialog_key_digest,
+                         digest_key_version, outcome_kind)
+                        VALUES (:id, 'VK', 'test-group', :event_digest, :dialog_digest, 1, 'DRAFT_UPDATED')"""),
+                {"id": uuid4(), "event_digest": b"event-1", "dialog_digest": b"dialog-2"},
+            )
+
+    with pytest.raises(IntegrityError, match="one_open_conversation_draft"):
+        with upgraded_database.begin() as connection:
+            connection.execute(
+                text("""INSERT INTO conversation_drafts
+                        (id, channel_identity_id, conversation_id, version, answers, step, expires_at)
+                        VALUES (:id, :identity_id, 'conversation-1', 1, '{}'::jsonb, 'CONTACT', now() + interval '1 hour')"""),
+                {"id": uuid4(), "identity_id": identity_id},
+            )
+
+    with pytest.raises(IntegrityError, match="submission_tokens_consumption"):
+        with upgraded_database.begin() as connection:
+            connection.execute(
+                text("""INSERT INTO submission_tokens
+                        (token_digest, digest_key_version, expires_at, used_receipt_id)
+                        VALUES (:digest, 1, now() + interval '1 hour', :receipt_id)"""),
+                {"digest": b"half-consumed", "receipt_id": receipt_id},
             )
