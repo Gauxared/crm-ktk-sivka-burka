@@ -1,0 +1,19 @@
+{
+  "id": "TEST-001",
+  "title": "Isolate public catalog PostgreSQL integration test database",
+  "type": "implementation",
+  "status": "BACKLOG",
+  "priority": "high",
+  "executor": {"preferred": "cloud", "fallback": "cloud"},
+  "reviewer": "cloud",
+  "depends_on": ["PUBLIC-002", "DB-001"],
+  "allowed_paths": ["tests/integration/test_public_catalog_api.py", "tasks/specs/TEST-001.json"],
+  "forbidden_paths": [".env", ".env.*", "apps/**", "alembic/**", "docs/**", "tasks/specs/PUBLIC-002.json"],
+  "context": ["AGENTS.md", "docs/development-pipeline.md", "tests/integration/test_public_catalog_api.py", "tasks/specs/PUBLIC-002.json", "tasks/specs/DB-001.json"],
+  "requirements": ["Use a uniquely named disposable database derived from DATABASE_URL or .env.example.", "Create/drop it through the postgres admin database with AUTOCOMMIT and FORCE, migrate it with Alembic, and run synthetic data tests there.", "Never mutate the configured source database and always clean up in finally."],
+  "acceptance": ["No TRUNCATE or direct test writes to configured DATABASE_URL remain.", "Focused integration, API, scope, and whitespace checks pass."],
+  "validation": [{"name":"focused integration test","argv":["{python}","-m","pytest","tests/integration/test_public_catalog_api.py","-q"],"timeout":180},{"name":"API tests","argv":["{python}","-m","pytest","tests/api","-q"],"timeout":120},{"name":"whitespace","argv":["git","diff","--check"],"timeout":10}],
+  "risk": "medium",
+  "retry_limit": 0,
+  "shared_paths_approval": {"paths":["tests/integration/test_public_catalog_api.py","tasks/specs/TEST-001.json"],"reviewer":"cloud:codex","reason":"Authorized repair of unsafe integration-test database isolation."}
+}
