@@ -1,0 +1,34 @@
+{
+  "id": "PIPE-007",
+  "title": "Reconcile a task worktree after an approved base change",
+  "type": "implementation",
+  "status": "BACKLOG",
+  "priority": "high",
+  "executor": {"preferred": "cloud", "fallback": "cloud"},
+  "reviewer": "cloud",
+  "depends_on": ["PIPE-006"],
+  "allowed_paths": ["scripts/task.py", "tests/pipeline/test_pipeline.py", "docs/development-pipeline.md", "tasks/specs/PIPE-007.json"],
+  "forbidden_paths": [".env", ".env.*", "**/.env", "**/.env.*"],
+  "context": ["scripts/task.py", "tests/pipeline/test_pipeline.py", "docs/development-pipeline.md"],
+  "requirements": [
+    "Add a controller command that rebases a clean task worktree onto its unchanged integration branch and refreshes the task base, invalidating previous validation and review seals.",
+    "Require an active or review-state task, a clean integration checkout, and no tracked or staged changes in the task worktree before reconciliation; failed rebase must surface as a pipeline error.",
+    "Add a regression test covering a task with a committed change, an advanced integration branch, reconciliation, and successful new validation. Document when to use the command."
+  ],
+  "acceptance": [
+    "An approved unrelated merge no longer makes an in-flight task impossible to finish after successful rebase and revalidation.",
+    "Old review and validation records cannot be reused after reconciliation.",
+    "Full pipeline tests pass."
+  ],
+  "validation": [
+    {"name": "pipeline tests", "argv": ["{python}", "-m", "pytest", "tests/pipeline", "-q"], "timeout": 90},
+    {"name": "whitespace", "argv": ["git", "diff", "--check"], "timeout": 10}
+  ],
+  "risk": "high",
+  "retry_limit": 0,
+  "shared_paths_approval": {
+    "paths": ["scripts/task.py", "tests/pipeline/test_pipeline.py", "docs/development-pipeline.md", "tasks/specs/PIPE-007.json"],
+    "reviewer": "cloud:codex",
+    "reason": "PIPE-006 legitimately advanced master while ENV-001 was in review, revealing that the documented reconcile path is missing from the controller."
+  }
+}
