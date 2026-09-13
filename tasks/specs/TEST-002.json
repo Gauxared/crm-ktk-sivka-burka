@@ -1,0 +1,31 @@
+{
+  "id": "TEST-002",
+  "title": "Complete negative-constraint coverage for owner session storage",
+  "type": "implementation",
+  "status": "BACKLOG",
+  "priority": "high",
+  "executor": {"preferred": "cloud", "fallback": "cloud"},
+  "reviewer": "cloud",
+  "depends_on": ["DB-006"],
+  "allowed_paths": ["tests/db006/**", "tasks/specs/TEST-002.json"],
+  "forbidden_paths": [".env", ".env.*", "alembic/**", "apps/**", "tests/api/**", "tests/integration/**", "docs/**", "packages/**"],
+  "context": ["AGENTS.md", "docs/development-pipeline.md", "docs/database.md", "tasks/specs/DB-006.json", "tests/db006/test_owner_accounts_sessions.py"],
+  "requirements": [
+    "Extend only DB-006 PostgreSQL tests so each accepted negative constraint has a direct synthetic assertion.",
+    "Cover an empty owner login, duplicate owner login, empty password hash and non-positive account credentials version.",
+    "With a valid persisted owner, separately cover empty token digest, empty CSRF secret, non-positive session credentials version, expiry at or before creation, last_seen before creation, revocation before creation and an unknown owner foreign key.",
+    "Preserve the existing uniquely named disposable-database setup and finally cleanup; never mutate the configured source DATABASE_URL.",
+    "Do not change migrations, application code, contracts, configuration or external integrations."
+  ],
+  "acceptance": [
+    "The DB-006 tests directly prove every owner/session constraint named in its task acceptance, without relying on a different failing constraint to reject a row.",
+    "Focused PostgreSQL tests and whitespace checks pass with only test and task-spec changes."
+  ],
+  "validation": [
+    {"name": "DB-006 PostgreSQL tests", "argv": ["{python}", "-m", "pytest", "tests/db006", "-q"], "timeout": 180},
+    {"name": "whitespace", "argv": ["git", "diff", "--check"], "timeout": 10}
+  ],
+  "risk": "medium",
+  "retry_limit": 0,
+  "shared_paths_approval": {"paths": ["tests/db006/**", "tasks/specs/TEST-002.json"], "reviewer": "cloud:codex", "reason": "Lead review found that DB-006 schema constraints were present but several required negative cases had no direct test; this task strengthens evidence without expanding implementation scope."}
+}
