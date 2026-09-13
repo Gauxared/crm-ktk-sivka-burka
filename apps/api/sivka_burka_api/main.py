@@ -14,6 +14,7 @@ from .inquiries import (
     SubmissionExpired,
 )
 from .public_submission import PublicSubmissionRuntime, SubmissionRateLimitError
+from .public_catalog import PublicCatalogRuntime, PublicCatalogUnavailable
 from .settings import load_settings
 
 
@@ -77,7 +78,7 @@ def _map_command_error(error: InquiryCommandError) -> JSONResponse:
     return _error("INVALID_REQUEST", 400)
 
 
-def create_app(*, public_submission_runtime: PublicSubmissionRuntime | None = None) -> FastAPI:
+def create_app(*, public_submission_runtime: PublicSubmissionRuntime | None = None, public_catalog_runtime: PublicCatalogRuntime | None = None) -> FastAPI:
     settings = load_settings()
     app = FastAPI(title="Sivka-Burka API", version="0.1.0")
 
@@ -85,6 +86,16 @@ def create_app(*, public_submission_runtime: PublicSubmissionRuntime | None = No
     def health() -> dict[str, str]:
         """Report process liveness only; this endpoint intentionally does not touch PostgreSQL."""
         return {"status": "ok", "service": "sivka-burka-api", "environment": settings.environment}
+
+    @app.get("/api/v1/public/catalog", tags=["public"])
+    def public_catalog() -> JSONResponse:
+        if public_catalog_runtime is None:
+            return _error("PUBLIC_CATALOG_UNAVAILABLE", 503)
+        try:
+            catalog = public_catalog_runtime.read()
+        except PublicCatalogUnavailable:
+            return _error("PUBLIC_CATALOG_UNAVAILABLE", 503)
+        return JSONResponse({"data": catalog}, headers=_NO_STORE)
 
     @app.post("/api/v1/public/submission-tokens", status_code=201, tags=["public"])
     async def issue_submission_token(request: Request) -> JSONResponse:
