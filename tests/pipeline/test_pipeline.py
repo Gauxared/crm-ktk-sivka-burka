@@ -195,6 +195,25 @@ class GitLifecycle(unittest.TestCase):
         with self.assertRaises(PipelineError):
             self.pipeline.finish('POC-100')
 
+    def test_reconcile_rebases_clean_task_and_invalidates_seals(self):
+        r, path = self.start_edit()
+        wt = Path(r['worktree'])
+        git(wt, 'add', 'apps/api/example.py')
+        git(wt, 'commit', '-m', 'Task change before integration advance')
+        (self.root / 'lead-note.txt').write_text('approved unrelated change\n')
+        git(self.root, 'add', 'lead-note.txt')
+        git(self.root, 'commit', '-m', 'Advance integration branch')
+
+        result = self.pipeline.reconcile('POC-100')
+
+        self.assertEqual(result['status'], 'ok')
+        self.assertEqual(r['base'], git(self.root, 'rev-parse', 'HEAD'))
+        self.assertEqual(r['state'], 'ACTIVE')
+        self.assertIsNone(r['validation'])
+        self.assertIsNone(r['review'])
+        self.assertEqual(path.read_text(), 'value = 1\n')
+        self.pipeline.validate('POC-100')
+
     def test_untracked_out_of_scope_is_rejected(self):
         r, _ = self.start_edit()
         (Path(r['worktree']) / 'outside.txt').write_text('outside')

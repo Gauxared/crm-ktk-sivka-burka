@@ -125,6 +125,22 @@ class Pipeline:
     def feedback(self, r):
         return {'review': r.get('review'), 'validation': r.get('validation'), 'blocker': r.get('blocker')}
 
+    def reconcile(self, task_id):
+        """Rebase one clean task branch after an unrelated approved integration merge."""
+        r = self.get(task_id)
+        require(r['state'] in ('ACTIVE', 'REVIEW'), 'Reconcile requires ACTIVE or REVIEW')
+        self.clean_root()
+        require(git(self.root, 'branch', '--show-current') == r['target'],
+                'Wrong integration branch')
+        wt = self.worktree(r)
+        require(not git(wt, 'status', '--porcelain'),
+                'Task worktree must have no unstaged, staged, or untracked source changes')
+        git(wt, 'rebase', r['target'])
+        r.update(base=git(self.root, 'rev-parse', 'HEAD'), state='ACTIVE', review=None,
+                 validation=None, blocker=None)
+        self.event(r, 'reconciled', base=r['base'], target=r['target'])
+        return {'status': 'ok', 'base': r['base']}
+
     def run(self, task_id, experimental_local=False):
         r = self.get(task_id)
         require(r['state'] == 'ACTIVE', 'Run requires ACTIVE')
@@ -287,7 +303,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest='command', required=True)
     sub.add_parser('create').add_argument('spec')
-    for name in ('ready', 'start', 'validate', 'finish', 'cleanup', 'handoff'):
+    for name in ('ready', 'start', 'validate', 'finish', 'cleanup', 'handoff', 'reconcile'):
         sub.add_parser(name).add_argument('id')
     run = sub.add_parser('run')
     run.add_argument('id')
