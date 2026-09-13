@@ -1,5 +1,6 @@
 """FastAPI application entry point."""
 
+import hmac
 import json
 from datetime import datetime, timezone
 
@@ -148,15 +149,19 @@ def create_app(*, public_submission_runtime: PublicSubmissionRuntime | None = No
         return request.headers.get("Origin") in runtime.trusted_origins
 
     def private_unauthorized() -> JSONResponse:
-        return _error("ADMIN_SESSION_UNAUTHORIZED", 401)
+        return _error("AUTH_REQUIRED", 401)
 
     @app.post("/api/v1/admin/session", tags=["admin"])
     async def admin_login(request: Request) -> JSONResponse:
         runtime = admin_runtime()
         if isinstance(runtime, JSONResponse):
             return runtime
-        if not trusted_origin(request, runtime) or request.headers.get("content-type", "").split(";", 1)[0].strip().lower() != "application/json" or request.headers.get("X-Requested-With") != "crm":
-            return _error("INVALID_REQUEST", 400)
+        if not trusted_origin(request, runtime):
+            return _error("FORBIDDEN", 403)
+        if request.headers.get("X-Requested-With") != "crm":
+            return _error("FORBIDDEN", 403)
+        if request.headers.get("content-type", "").split(";", 1)[0].strip().lower() != "application/json":
+            return _error("UNSUPPORTED_MEDIA_TYPE", 415)
         try:
             runtime.login_attempt_limiter.check("admin-session-login", request)
         except LoginRateLimited:
@@ -191,8 +196,20 @@ def create_app(*, public_submission_runtime: PublicSubmissionRuntime | None = No
         runtime = admin_runtime()
         if isinstance(runtime, JSONResponse):
             return runtime
-        token, csrf_token = request.cookies.get(COOKIE_NAME), request.headers.get("X-CSRF-Token")
-        if not trusted_origin(request, runtime) or not token or not csrf_token or not runtime.revoke(token, csrf_token):
+        if not trusted_origin(request, runtime):
+            return _error("FORBIDDEN", 403)
+        token = request.cookies.get(COOKIE_NAME)
+        session = runtime.active_session(token) if token else None
+        if session is None:
+            return private_unauthorized()
+        csrf_token = request.headers.get("X-CSRF-Token")
+        try:
+            csrf_valid = hmac.compare_digest(session["csrf_secret"], csrf_token.encode("ascii"))
+        except (AttributeError, UnicodeEncodeError):
+            csrf_valid = False
+        if not csrf_valid:
+            return _error("CSRF_FAILED", 403)
+        if not runtime.revoke(token, csrf_token):
             return private_unauthorized()
         response = JSONResponse({"data": {"signed_out": True}}, headers=_NO_STORE)
         response.delete_cookie(COOKIE_NAME, secure=True, httponly=True, samesite="lax", path="/")
