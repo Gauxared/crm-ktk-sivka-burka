@@ -127,12 +127,23 @@ def test_login_read_and_sign_out_are_server_side_and_protected(database):
     assert client.get("/api/v1/admin/session").status_code == 401
 
 
-@pytest.mark.parametrize("headers", [{}, {"Origin": "https://untrusted.invalid", "Content-Type": "application/json", "X-Requested-With": "crm"}, {"Origin": ORIGIN, "Content-Type": "text/plain", "X-Requested-With": "crm"}, {"Origin": ORIGIN, "Content-Type": "application/json"}])
-def test_login_rejects_missing_or_untrusted_browser_contract(database, headers):
+@pytest.mark.parametrize(
+    ("headers", "expected_status", "expected_code"),
+    [
+        ({}, 403, "FORBIDDEN"),
+        ({"Origin": "https://untrusted.invalid", "Content-Type": "application/json", "X-Requested-With": "crm"}, 403, "FORBIDDEN"),
+        ({"Origin": ORIGIN, "Content-Type": "text/plain", "X-Requested-With": "crm"}, 415, "UNSUPPORTED_MEDIA_TYPE"),
+        ({"Origin": ORIGIN, "Content-Type": "application/json"}, 403, "FORBIDDEN"),
+        ({"Origin": ORIGIN, "Content-Type": "application/json", "X-Requested-With": "not-crm"}, 403, "FORBIDDEN"),
+    ],
+)
+def test_login_rejects_browser_contract_without_creating_session(database, headers, expected_status, expected_code):
     provision(database)
     response = client_for(database).post("/api/v1/admin/session", headers=headers, json={"login": "owner", "password": "correct horse"})
-    assert response.status_code == 400
-    assert response.json() == {"error": {"code": "INVALID_REQUEST"}}
+    assert response.status_code == expected_status
+    assert response.json() == {"error": {"code": expected_code}}
+    with database.connect() as connection:
+        assert connection.execute(text("SELECT count(*) FROM owner_sessions")).scalar_one() == 0
 
 
 @pytest.mark.parametrize("kind", ["unknown", "disabled", "invalid", "malformed"])
@@ -151,21 +162,31 @@ def test_private_login_failures_are_indistinguishable_and_create_no_session(data
         payload = {"login": "owner", "password": "wrong"}
     response = client_for(database).post("/api/v1/admin/session", headers=login_headers(), json=payload)
     assert response.status_code == 401
-    assert response.json() == {"error": {"code": "ADMIN_SESSION_UNAUTHORIZED"}}
+    assert response.json() == {"error": {"code": "AUTH_REQUIRED"}}
     with database.connect() as connection:
         assert connection.execute(text("SELECT count(*) FROM owner_sessions")).scalar_one() == 0
 
 
-def test_limiter_and_invalid_csrf_do_not_reveal_or_revoke(database):
+def test_limiter_and_rejected_sign_outs_do_not_reveal_or_revoke(database):
     provision(database)
     limited = client_for(database, reject=True).post("/api/v1/admin/session", headers=login_headers(), json={"login": "owner", "password": "wrong"})
     assert limited.status_code == 429
     client = client_for(database)
-    token = login(client).json()["data"]["csrf_token"]
-    rejected = client.delete("/api/v1/admin/session", headers={"Origin": ORIGIN, "X-CSRF-Token": "wrong"})
-    assert rejected.status_code == 401
-    assert client.get("/api/v1/admin/session").status_code == 200
-    assert client.delete("/api/v1/admin/session", headers={"Origin": "https://untrusted.invalid", "X-CSRF-Token": token}).status_code == 401
+    csrf_token = login(client).json()["data"]["csrf_token"]
+    for headers, expected_status, expected_code in (
+        ({"Origin": ORIGIN, "X-CSRF-Token": "wrong"}, 403, "CSRF_FAILED"),
+        ({"Origin": ORIGIN}, 403, "CSRF_FAILED"),
+        ({"Origin": "https://untrusted.invalid", "X-CSRF-Token": csrf_token}, 403, "FORBIDDEN"),
+    ):
+        rejected = client.delete("/api/v1/admin/session", headers=headers)
+        assert rejected.status_code == expected_status
+        assert rejected.json() == {"error": {"code": expected_code}}
+        assert client.get("/api/v1/admin/session").status_code == 200
+    missing_session = client_for(database).delete("/api/v1/admin/session", headers={"Origin": ORIGIN})
+    assert missing_session.status_code == 401
+    assert missing_session.json() == {"error": {"code": "AUTH_REQUIRED"}}
+    with database.connect() as connection:
+        assert connection.execute(text("SELECT count(*) FILTER (WHERE revoked_at IS NOT NULL) FROM owner_sessions")).scalar_one() == 0
 
 
 @pytest.mark.parametrize("change", ["expired", "revoked", "version", "disabled"])
