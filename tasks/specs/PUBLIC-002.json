@@ -1,0 +1,19 @@
+{
+  "id": "PUBLIC-002",
+  "title": "Expose read-only public catalog endpoint",
+  "type": "implementation",
+  "status": "BACKLOG",
+  "priority": "high",
+  "executor": {"preferred": "cloud", "fallback": "cloud"},
+  "reviewer": "cloud",
+  "depends_on": ["PUBLIC-001"],
+  "allowed_paths": ["apps/api/**", "tests/api/**", "tests/integration/**", "docs/development-setup.md", "tasks/specs/PUBLIC-002.json"],
+  "forbidden_paths": [".env", ".env.*", "alembic/**", "apps/web/**", "apps/bots/**", "packages/**", "docs/api.md", "docs/database.md", "tasks/specs/ARCH-*.json", "tasks/specs/APP-*.json", "tasks/specs/DB-*.json"],
+  "context": ["AGENTS.md", "docs/development-pipeline.md", "docs/api.md", "docs/database.md", "apps/api/sivka_burka_api/main.py", "tasks/specs/PUBLIC-001.json"],
+  "requirements": ["Implement GET /api/v1/public/catalog as a read-only stable DTO from active services/options and club_settings.", "Expose only accepted public fields: catalog_version, club_timezone, contact_info, location_link, visit_rules, services and options; never expose inactive or hidden options, PII, administrative or technical fields.", "Cover fixed and negotiated pricing, empty/incomplete catalog behavior, privacy and no-write semantics with API and PostgreSQL integration tests."],
+  "acceptance": ["Configured PostgreSQL-backed catalog returns only active catalogue data in the docs/api.md envelope and stable DTO.", "Missing settings or incomplete catalogue returns a deterministic safe error without writes.", "Focused API, PostgreSQL integration, scope and whitespace validation pass."],
+  "validation": [{"name":"public API tests","argv":["{python}","-m","pytest","tests/api","-q"],"timeout":120},{"name":"public integration tests","argv":["{python}","-m","pytest","tests/integration/test_public_catalog_api.py","-q"],"timeout":180},{"name":"whitespace","argv":["git","diff","--check"],"timeout":10}],
+  "risk": "medium",
+  "retry_limit": 0,
+  "shared_paths_approval": {"paths":["apps/api/**","tests/api/**","tests/integration/**","docs/development-setup.md","tasks/specs/PUBLIC-002.json"],"reviewer":"cloud:codex","reason":"User-authorized read-only public catalog vertical slice; no new business or database contract."}
+}
