@@ -1,7 +1,7 @@
 # Хранение данных MVP «Сивка-Бурка»
 
 Status: ACCEPTED
-Задача: ARCH-006. Версия: 1.0. Дата: 2026-09-13.
+Задача: ARCH-006; уточнение ARCH-008. Версия: 1.1. Дата: 2026-09-13.
 Основание: [требования](requirements.md), [архитектура](architecture.md),
 [домен](domain-model.md), [переходы](booking-flow.md), [API](api.md).
 Это принятая спецификация схемы и транзакций. Миграции, работающая БД и интеграционные
@@ -256,18 +256,65 @@ VisitDetail, InquiryDetail, каталог и одна страница кале
 
 ## 8. Уведомления и сессии
 
-notification_jobs: id PK, origin_event_id FK, inquiry_id FK, recipient_ref, kind,
-status, attempt_count, next_attempt_at, lease_token NULL, lease_until NULL,
-last_error_code NULL, delivered_at NULL, payload_schema_version.
-UNIQUE(origin_event_id,recipient_ref,kind). Полезная нагрузка минимальна; точные виды,
-адресат и правила повторов принимает ARCH-007. Тексты/контакты не копируются в last_error.
+Источник полей доставки — этот раздел; состояния, интервалы и шаблон сообщения —
+[notifications.md](notifications.md). Уточнение ARCH-008 согласовано до написания миграций.
 
-Запись job входит в бизнес-commit. Доставщик коротко захватывает подходящую строку,
-назначает аренду и commit; затем обращается к платформе вне транзакции. Результат обновляет
-только при совпадении lease_token. Потерянный ответ платформы может дать повтор сообщения,
-но не повторную заявку. Сбой доставщика не откатывает Inquiry. Его изменения доставки
-не увеличивают версии бизнес-плана: notification_summary — оперативная сводка, не условие
-групповых команд. Семантика delivered не означает прочтение владельцем.
+| Таблица | Поля и ограничения |
+| --- | --- |
+| notification_recipient_state | recipient_ref text PK, lease_token uuid NULL, lease_until timestamptz NULL, next_allowed_at timestamptz; пара аренды либо полностью NULL, либо полностью задана |
+| notification_jobs | id uuid PK, origin_event_id FK, inquiry_id FK, recipient_ref FK, kind=OWNER_INQUIRY_RECEIVED, version bigint > 0, status, attempt_count bigint >= 0, cycle_no integer > 0, cycle_started_at timestamptz, cycle_attempt_count integer 0..8, next_attempt_at timestamptz, lease_token uuid NULL, lease_until timestamptz NULL, last_error_code NULL, delivered_at timestamptz NULL, payload_schema_version integer > 0 |
+| notification_attempts | id uuid PK, job_id FK, cycle_no > 0, attempt_no 1..8, started_at timestamptz, finished_at timestamptz NULL, outcome_code NULL, provider_message_id text NULL; UNIQUE(job_id,cycle_no,attempt_no) |
+| notification_control_events | id uuid PK, command_id FK UNIQUE на operation_receipts, job_id FK, owner_id FK, recorded_at timestamptz, action RETRY/REASSIGN/SUPPRESS, reason, old_recipient_ref FK, new_recipient_ref FK |
+
+У job UNIQUE(origin_event_id,recipient_ref,kind); связывание с другим назначением не создаёт
+нового события заявки. При конфликте уникальности REASSIGN отклоняется целиком.
+Допустимые status: PENDING/SENDING/RETRY_WAIT/SENT/BLOCKED/FAILED/SUPPRESSED.
+CHECK: SENDING тогда и только тогда, когда оба поля аренды заданы; SENT требует delivered_at,
+остальные состояния имеют delivered_at IS NULL. attempt_count >= cycle_attempt_count.
+При первом создании version=1, attempt_count=0, cycle_no=1, cycle_attempt_count=0,
+cycle_started_at=время постановки; next_attempt_at=то же время. Без назначения — BLOCKED
+с CONFIG_MISSING и recipient_ref=OWNER_PRIMARY_UNCONFIGURED: это строка очереди,
+не разрешённый внешний адресат. Реальный chat_id остаётся в доверенной конфигурации.
+
+Job создаётся вместе с заявкой и исходным событием одной бизнес-транзакцией под guard.
+Доставщик блокирует строку назначения, затем job; проверяет next_allowed_at, статус,
+бюджет текущего цикла и срок 48 часов. При захвате атомарно увеличивает оба счётчика,
+version и создаёт attempt со started_at, назначает аренды, затем commit. Сетевой вызов
+вне транзакции. Завершение попытки, состояние/версия job, снятие аренд и обновление
+next_allowed_at назначения записываются одной короткой транзакцией, только при совпадении
+обоих lease_token. Невладеющий арендой процесс не может подтвердить/освободить чужую аренду.
+
+Истёкшая аренда восстанавливается под теми же блокировками: незавершённый attempt
+получает finished_at и DELIVERY_UNCERTAIN, job — RETRY_WAIT либо FAILED при исчерпании
+бюджета, аренды снимаются, version растёт. Счётчики не обнуляются. Возможен внешний дубль,
+если сообщение успело уйти; изменения Inquiry при этом отсутствуют.
+Provider_message_id записывается только по подтверждённому успеху и не доказывает прочтение.
+
+Операторские команды определены в [API, раздел 13](api.md#13-операторские-команды-доставки).
+Они захватывают business_write_guard, затем исходное и целевое назначения в порядке
+recipient_ref, затем job. Доставщик никогда не запрашивает business_write_guard после
+своих блокировок: обратного порядка нет. Version проверяется под блокировкой; состояние,
+новый receipt и control_event фиксируются одним commit. Аудит исполнения команды
+хранится в notification_control_events, не увеличивает версии Inquiry/Visit.
+
+RETRY увеличивает cycle_no, задаёт cycle_started_at=now, cycle_attempt_count=0 и PENDING;
+общий attempt_count сохраняется. REASSIGN меняет только назначение и version, не снимает
+BLOCKED/FAILED и не начинает новый цикл; после него нужна явная RETRY. SUPPRESS сохраняет
+цикл/счётчики и ставит SUPPRESSED. Изменения SENDING оператором запрещены до завершения
+или восстановления аренды. При восстановленной аренде поздний физический сетевой ответ
+остаётся возможным; подавление не обещает отозвать уже начатую отправку.
+
+Очистка attempts через 30 дней после окончания цикла не меняет job-счётчики и не позволяет
+повторять номера попыток. Аудит оператора и защиту ключей не удалять этим TTL. История
+cycles сохраняется в событиях RETRY и итогах; текущие поля job достаточны для ограничения
+попыток независимо от очистки подробного журнала. outcome_code и last_error_code —
+безопасные коды, без текста/контактов/сырых ответов и токенов.
+
+Доставка не меняет версии заявки или плана. notification_summary в карточке — оперативная
+сводка; собственная version задания используется только операторскими командами.
+Индексы: jobs(status,next_attempt_at,id), jobs(recipient_ref,status),
+attempts(job_id,cycle_no,attempt_no), control_events(job_id,recorded_at,id).
+FK ON DELETE RESTRICT; удаление заявок с историей требует отдельной контролируемой очистки.
 
 owner_accounts: id PK, login UNIQUE, password_hash, disabled_at NULL, credentials_version.
 owner_sessions: token_digest PK, owner_id FK, credentials_version, csrf_secret,
@@ -342,6 +389,6 @@ created_at, last_seen_at, expires_at, revoked_at NULL. Сырые session cookie
 
 Приёмка ARCH-006: схема прослеживается к ARCH-003/005, определены SQL-ограничения и
 отдельно прикладные инварианты, транзакции/повторы/история, ограничения очистки и восстановления.
-Следующий ARCH-007 определяет уведомления владельцу. Затем отдельные ограниченные задачи
-могут поручаться локальному воркеру: миграции и репозитории по этой схеме с облачным review.
+ARCH-007 и уточнение ARCH-008 определяют доставку и операторские команды.
+Миграции и репозитории реализуются облачным исполнителем по процессу v2.
 Изменять бизнес-переходы, правила допуска или финансовые условия при реализации нельзя.
