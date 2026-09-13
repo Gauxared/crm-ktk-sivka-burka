@@ -1,0 +1,33 @@
+{
+  "id": "AUTH-002",
+  "title": "Align owner-session HTTP errors with accepted authorization and CSRF contract",
+  "type": "implementation",
+  "status": "BACKLOG",
+  "priority": "high",
+  "executor": {"preferred": "cloud", "fallback": "cloud"},
+  "reviewer": "cloud",
+  "depends_on": ["AUTH-001"],
+  "allowed_paths": ["apps/api/sivka_burka_api/main.py", "apps/api/sivka_burka_api/admin_sessions.py", "tests/api/test_admin_session_routes.py", "tests/integration/test_admin_session_api.py", "tasks/specs/AUTH-002.json"],
+  "forbidden_paths": [".env", ".env.*", "alembic/**", "apps/web/**", "apps/bots/**", "packages/**", "docs/**", "pyproject.toml"],
+  "context": ["AGENTS.md", "docs/development-pipeline.md", "docs/api.md", "tasks/specs/AUTH-001.json", "apps/api/sivka_burka_api/main.py", "apps/api/sivka_burka_api/admin_sessions.py", "tests/api/test_admin_session_routes.py", "tests/integration/test_admin_session_api.py"],
+  "requirements": [
+    "Replace the private authorization response used by owner-session routes with the accepted 401 AUTH_REQUIRED error envelope, without revealing whether a login exists, a session expired, was revoked, or credentials changed.",
+    "For login, return 403 FORBIDDEN when Origin is missing or not in the exact runtime allowlist, 403 FORBIDDEN when X-Requested-With: crm is missing or wrong, and 415 UNSUPPORTED_MEDIA_TYPE for a non-JSON Content-Type. Preserve stable malformed-payload behavior without disclosing authentication state.",
+    "For sign-out, distinguish an invalid or absent session (401 AUTH_REQUIRED) from an active session with missing/mismatched CSRF token (403 CSRF_FAILED) and from an untrusted Origin (403 FORBIDDEN). Do not revoke or disclose data in any rejected case.",
+    "Preserve all existing AUTH-001 fail-closed runtime, cookie, password, token-digest, origin matching, rate-limit and server-side session semantics. Do not add CORS, credentials, runtime configuration, bootstrap behavior or unrelated commands.",
+    "Add direct API and disposable-PostgreSQL integration assertions for each error code/status and each rejected sign-out must leave the session usable unless a valid sign-out is accepted."
+  ],
+  "acceptance": [
+    "Owner-session responses follow the accepted docs/api.md authorization, CSRF and media-type error codes without an implementation-specific authorization code.",
+    "A rejected Origin, media type or CSRF request cannot create or revoke a session, and invalid credentials remain indistinguishable.",
+    "Focused API/integration tests, scope and whitespace checks pass."
+  ],
+  "validation": [
+    {"name": "API tests", "argv": ["{python}", "-m", "pytest", "tests/api", "-q"], "timeout": 180},
+    {"name": "admin session integration tests", "argv": ["{python}", "-m", "pytest", "tests/integration/test_admin_session_api.py", "-q"], "timeout": 180},
+    {"name": "whitespace", "argv": ["git", "diff", "--check"], "timeout": 10}
+  ],
+  "risk": "high",
+  "retry_limit": 0,
+  "shared_paths_approval": {"paths": ["apps/api/sivka_burka_api/main.py", "apps/api/sivka_burka_api/admin_sessions.py", "tests/api/test_admin_session_routes.py", "tests/integration/test_admin_session_api.py", "tasks/specs/AUTH-002.json"], "reviewer": "cloud:codex", "reason": "Lead review found a direct mismatch between AUTH-001 route errors and the accepted admin authorization/CSRF/media-type contract; this repair changes only those observable error semantics and their evidence."}
+}
