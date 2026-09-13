@@ -27,6 +27,16 @@ def spec(task_id='POC-100'):
 
 
 class PolicyTests(unittest.TestCase):
+    def test_autonomous_execution_policy_is_documented(self):
+        root = Path(__file__).resolve().parents[2]
+        agents = (root / 'AGENTS.md').read_text(encoding='utf-8')
+        pipeline = (root / 'docs/development-pipeline.md').read_text(encoding='utf-8')
+        lifecycle = (root / 'docs/task-lifecycle.md').read_text(encoding='utf-8')
+        self.assertIn('Autonomous Execution Policy', agents)
+        self.assertIn('pre-authorizes its complete safe, reversible lifecycle', agents)
+        self.assertIn('diagnose → fix → validate again → review again', pipeline)
+        self.assertIn('`drive ID` performs only deterministic controller work', lifecycle)
+
     def test_scope_and_forbidden_override(self):
         check_scope(spec(), ['apps/api/health.py'])
         for path in ['apps/web/page.py', 'apps/api/private/token.py', 'apps/api/../../secret',
@@ -178,6 +188,37 @@ class GitLifecycle(unittest.TestCase):
         self.pipeline.cleanup('POC-100')
         self.assertIsNone(r['worktree'])
         self.assertFalse(path.exists())
+
+    def test_drive_advances_safe_steps_but_requires_implementation_and_review(self):
+        result = self.pipeline.drive('POC-100')
+        r = self.pipeline.get('POC-100')
+        self.assertEqual(result['status'], 'implementation_required')
+        self.assertEqual(result['actions'], ['started'])
+        self.assertEqual(r['state'], 'ACTIVE')
+
+        path = Path(r['worktree']) / 'apps/api/example.py'
+        path.parent.mkdir(parents=True)
+        path.write_text('value = 1\n')
+        result = self.pipeline.drive('POC-100')
+        self.assertEqual(result['status'], 'self_review_required')
+        self.assertEqual(result['actions'], ['validated'])
+        self.assertEqual(r['state'], 'REVIEW')
+
+        self.approve()
+        result = self.pipeline.drive('POC-100')
+        self.assertEqual(result['status'], 'done')
+        self.assertEqual(result['actions'], ['finished', 'cleaned_up'])
+        self.assertEqual(r['state'], 'DONE')
+        self.assertIsNone(r['worktree'])
+
+    def test_drive_does_not_bypass_dependency_check(self):
+        task = spec('POC-101')
+        task['status'] = 'BACKLOG'
+        task['depends_on'] = ['MISSING-001']
+        write_json(self.root / '.pipeline/blocked.json', task)
+        self.pipeline.create(self.root / '.pipeline/blocked.json')
+        with self.assertRaisesRegex(PipelineError, 'Dependency not DONE'):
+            self.pipeline.drive('POC-101')
 
     def test_failed_gate_cannot_review_or_finish(self):
         r, _ = self.start_edit('this is invalid python !!!')

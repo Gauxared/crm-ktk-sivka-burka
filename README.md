@@ -19,20 +19,21 @@
 
 ```powershell
 python scripts/task.py create tasks/specs/DEV-001.json
-python scripts/task.py ready DEV-001
-python scripts/task.py start DEV-001
-python scripts/task.py run DEV-001
-# Ведущий реализует изменение в указанном worktree.
-python scripts/task.py validate DEV-001
+# Подготовит READY/ACTIVE и вернёт worktree для реализации.
+python scripts/task.py drive DEV-001
+# Codex реализует принятое изменение в указанном worktree без checkpoint у пользователя.
+# После изменения drive запустит validation и запросит self-review фактического diff.
+python scripts/task.py drive DEV-001
 python scripts/task.py review DEV-001 reports/runs/DEV-001/cloud-review.json
-python scripts/task.py finish DEV-001
-python scripts/task.py cleanup DEV-001
+# Текущий PASS review позволяет drive безопасно finish и cleanup.
+python scripts/task.py drive DEV-001
 ```
 
 DEV-001 и review.json в примере — будущие файлы, их нужно подготовить, а не запускать
 несуществующую задачу. run готовит контекст для текущего облачного исполнителя;
 не запускает отдельную облачную модель и не требует .env, GGUF или TurboLLM.
-После замечаний ведущий исправляет код и повторяет validate/review.
+После замечаний ведущий исправляет код и повторяет drive/review. `drive` не пишет
+продуктовый код и не создаёт review evidence: это остаётся проверяемой обязанностью Codex.
 
 ## Локальный эксперимент
 

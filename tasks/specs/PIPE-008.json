@@ -1,0 +1,19 @@
+{
+  "id": "PIPE-008",
+  "title": "Drive authorized work to completion without routine human checkpoints",
+  "type": "infrastructure",
+  "status": "BACKLOG",
+  "priority": "high",
+  "executor": {"preferred": "cloud", "fallback": "cloud"},
+  "reviewer": "cloud",
+  "depends_on": ["FLOW-001", "PIPE-007"],
+  "allowed_paths": ["AGENTS.md", "README.md", "docs/development-pipeline.md", "docs/task-lifecycle.md", "tasks/TASK_TEMPLATE.md", "scripts/task.py", "tests/pipeline/test_pipeline.py", "tasks/specs/PIPE-008.json"],
+  "forbidden_paths": [".env", ".env.*", "apps/**", "alembic/**", "packages/**"],
+  "context": ["AGENTS.md", "docs/development-pipeline.md", "docs/task-lifecycle.md", "scripts/task.py", "tests/pipeline/test_pipeline.py"],
+  "requirements": ["Document that an accepted, sufficiently specified task pre-authorizes its full safe and reversible lifecycle; routine analysis, implementation, testing, fixes, validation, self-review, reconcile and completion do not need user checkpoints.", "Document concrete escalation conditions, the diagnose-fix-revalidate-rereview recovery loop, and an honest self-review rule for a single Codex executor without requiring extra agents.", "Add a controller drive command that applies only deterministic lifecycle transitions and reports the next Codex responsibility; it must retain dependency, lock, scope, validation, review, reconcile and finish safeguards and must not execute implementation or fabricate review evidence.", "Add regression coverage for the drive command and autonomous-policy documentation; update the command reference and a complete autonomous lifecycle example."],
+  "acceptance": ["A new Codex session has unambiguous repository instructions to complete an authorized task or report one concrete true blocker.", "drive advances only safe controller transitions and never finishes without a current PASS review or bypasses scope and dependency checks.", "Pipeline regressions and whitespace checks pass."],
+  "validation": [{"name": "pipeline tests", "argv": ["{python}", "-m", "pytest", "tests/pipeline", "-q"], "timeout": 120}, {"name": "whitespace", "argv": ["git", "diff", "--check"], "timeout": 10}],
+  "risk": "high",
+  "retry_limit": 0,
+  "shared_paths_approval": {"paths": ["AGENTS.md", "README.md", "docs/development-pipeline.md", "docs/task-lifecycle.md", "tasks/TASK_TEMPLATE.md", "scripts/task.py", "tests/pipeline/test_pipeline.py", "tasks/specs/PIPE-008.json"], "reviewer": "cloud:codex", "reason": "The user explicitly authorized a minimal, safeguards-preserving autonomy improvement to the existing pipeline."}
+}
