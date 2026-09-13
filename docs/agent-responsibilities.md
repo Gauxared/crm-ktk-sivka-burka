@@ -1,15 +1,26 @@
-# Executor selection
+# Роли и ответственность
 
-| Route | Criteria | Examples |
+Основной исполнитель — облачная модель в текущей задаче Codex. Роли ниже не означают
+четыре агента, четыре платных вызова или обязательную передачу каждой правки между ними.
+
+| Обязанность | Результат | Когда углублять |
 | --- | --- | --- |
-| LOCAL | Exact spec, one module, reversible, low ambiguity, trivial to verify | Docs draft, repetitive mapping |
-| LOCAL + CLOUD REVIEW | Bounded implementation, approved contracts, automated checks | UI, CRUD, DTO, API adapter, approved migration |
-| CLOUD | Ambiguity, cross-module impact, difficult debugging, weak testability | Requirements, decomposition, integration review |
-| CLOUD ONLY | Architecture/shared contracts/security/concurrency impact | Auth, payments, booking capacity, DB redesign |
+| Ведущий / архитектор | Границы задачи, решение спорных правил, общие контракты | Несколько модулей, данные, интеграции, безопасность |
+| Разработчик | Изменение кода и проверки в worktree | Обычный основной поток разработки |
+| QA | Наблюдаемые критерии, ошибки и регрессии | Переходы состояний, потерянный ответ, доступ, конкуренция |
+| Reviewer | Проверка diff, тестов, scope и ограничений результата | Риск определяет глубину review, не количество файлов |
+| Локальная модель | Необязательное экспериментальное предложение | Только отдельный ограниченный эксперимент с измеримой гипотезой |
 
-Even LOCAL output requires lead approval before integration in this bootstrap.
-Local never owns architecture. A small diff can still be security critical.
-Architect owns task scope and canonical docs; reviewer owns acceptance; QA owns
-independent test criteria. Root configs, lockfiles, schema and contracts require
-a dedicated cloud task and explicit shared_paths_approval with reviewer and reason.
-Permissions do not expand when a model asks for them. Escalate ambiguous requirements.
+Один ведущий может совмещать первые четыре обязанности; это прозрачная самопроверка.
+Независимость теста означает, что критерий получен из контракта, а не скопирован из реализации.
+Отдельный reviewer может быть полезен на сложном изменении, но не запускается без разрешения.
+
+Низкий риск: текст/стиль/маленькая обратимая правка — просмотр diff и профильная проверка;
+не создавать зеркальные тесты ради количества. Средний риск: изменение поведения — тесты
+контракта и соответствующие регрессии. Высокий риск: auth, SQL, идемпотентность, конкуренция —
+негативные и интеграционные сценарии, проверка отказов и транзакционных границ.
+Для версионируемой задачи во всех случаях сохраняются validate/review и привязка к snapshot.
+
+Общие конфиги, зависимости, миграции и DTO требуют dedicated cloud task с
+shared_paths_approval. Локальная модель не принимает архитектурные решения. Нельзя
+автоматически считать UI, CRUD или миграцию безопасными лишь потому, что diff мал.

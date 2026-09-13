@@ -1,4 +1,6 @@
-# Architect / cloud
-Inspect requirements and current code. Own contracts, accepted ADRs, task scopes,
-security, concurrency and decomposition. Specify context and independent validation.
-Do not enable product work before PIPE-005. Keep local tasks small and unambiguous.
+# Ведущий / архитектор
+
+Основной облачный исполнитель проверяет требования и код, задаёт контракты и scope.
+Планирует продукт через облачную реализацию по умолчанию; локальный benchmark не блокирует её.
+Принятые бизнес-решения и явные зависимости обязательны. Не превращать каждый небольшой
+шаг в отдельную агентную роль. Не подменять отсутствующее правило предположением модели.

@@ -219,11 +219,47 @@ class GitLifecycle(unittest.TestCase):
         self.assertEqual(r['state'], 'ACTIVE')
         self.assertEqual(self.pipeline.feedback(r)['review']['blocking'], ['Fix value'])
 
+    def test_local_run_requires_opt_in_before_config_or_attempt(self):
+        r, _ = self.start_edit()
+        with patch('task.config', side_effect=AssertionError('must not read local config')):
+            with self.assertRaisesRegex(PipelineError, 'experimental'):
+                self.pipeline.run('POC-100')
+        self.assertEqual(r['attempts'], 0)
+        self.assertEqual(r['state'], 'ACTIVE')
+
+    def test_cloud_lifecycle_without_local_server_config_or_bootstrap(self):
+        task = spec('DEV-100')
+        task['executor']['preferred'] = 'cloud'
+        write_json(self.root / '.pipeline/cloud.json', task)
+        self.pipeline.create(self.root / '.pipeline/cloud.json')
+        self.pipeline.start('DEV-100')
+        with patch('task.config', side_effect=AssertionError('local config forbidden')), \
+             patch('task.LocalExecutor.run', side_effect=AssertionError('local call forbidden')):
+            result = self.pipeline.run('DEV-100')
+        self.assertEqual(result['mode'], 'manual_cloud_handoff')
+        r = self.pipeline.get('DEV-100')
+        self.assertEqual(r['attempts'], 0)
+        p = Path(r['worktree']) / 'apps/api/example.py'
+        p.parent.mkdir(parents=True)
+        p.write_text('value = 1\n')
+        self.pipeline.validate('DEV-100')
+        review = {'task': 'DEV-100', 'reviewer': 'cloud:test', 'status': 'PASS',
+                  'snapshot': r['validation']['snapshot'], 'blocking': [],
+                  'non_blocking': [], 'recommended_actions': [],
+                  'tests': {'status': 'pass'}, 'scope': {'status': 'pass'},
+                  'architecture': {'status': 'pass'}}
+        write_json(self.root / '.pipeline/cloud-review.json', review)
+        self.pipeline.review('DEV-100', self.root / '.pipeline/cloud-review.json')
+        self.pipeline.finish('DEV-100')
+        self.pipeline.cleanup('DEV-100')
+        self.assertEqual(r['state'], 'DONE')
+        self.assertIsNone(r['worktree'])
+
     def test_retry_limit_escalates_without_api_call(self):
         r, _ = self.start_edit()
         r['attempts'] = 2
         with self.assertRaises(PipelineError):
-            self.pipeline.run('POC-100')
+            self.pipeline.run('POC-100', experimental_local=True)
         self.assertEqual(r['state'], 'BLOCKED')
         self.assertIn('escalate', r['blocker'])
 
@@ -240,9 +276,9 @@ class GitLifecycle(unittest.TestCase):
                 'elapsed_seconds': 0, 'usage': {}}
         with patch('task.LocalExecutor.run', reply):
             with self.assertRaises(PipelineError):
-                self.pipeline.run('POC-100')
+                self.pipeline.run('POC-100', experimental_local=True)
             self.assertEqual(r['state'], 'ACTIVE')
-            self.pipeline.run('POC-100')
+            self.pipeline.run('POC-100', experimental_local=True)
         self.assertIn('Outside allowed_paths', seen[1]['feedback']['blocker'])
         self.assertEqual(r['attempts'], 2)
         self.assertEqual(r['retry_count'], 1)
@@ -252,7 +288,7 @@ class GitLifecycle(unittest.TestCase):
         with self.assertRaises(PipelineError):
             accept(self.pipeline, 'POC-100', {'status': 'PASS'})
 
-    def test_dependency_and_product_gate(self):
+    def test_explicit_dependencies_still_required_without_implicit_poc_gate(self):
         task = spec('ARCH-001')
         task['depends_on'] = ['PIPE-005']
         write_json(self.root / '.pipeline/arch.json', task)
@@ -261,8 +297,8 @@ class GitLifecycle(unittest.TestCase):
         task['depends_on'] = []
         write_json(self.root / '.pipeline/arch.json', task)
         self.pipeline.create(self.root / '.pipeline/arch.json')
-        with self.assertRaises(PipelineError):
-            self.pipeline.start('ARCH-001')
+        self.pipeline.start('ARCH-001')
+        self.assertEqual(self.pipeline.get('ARCH-001')['state'], 'ACTIVE')
 
     def test_concurrent_overlapping_scope_is_rejected(self):
         self.start_edit()

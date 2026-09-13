@@ -1,10 +1,13 @@
 # Sivka-Burka development
 
 Read docs/development-pipeline.md and the assigned task before editing.
-Product implementation is gated by successful PIPE-005. Architecture remains pending.
-Use the central runner from the primary checkout. Each executor edits only its assigned
-worktree and allowed paths. Never push, deploy, access secrets, or expand scope implicitly.
-Accepted ADRs and task contracts govern implementation. Report missing contracts.
-Local output is untrusted; the lead reviews actual changes and validation evidence.
-Do not run concurrent controllers. The runner lock serializes state mutations.
-Never remove a stale lock without checking that its recorded process has ended.
+Cloud is the default product implementer. Architect, developer, QA and reviewer are
+responsibilities, not mandatory separate agents. Do not spawn agents without explicit authorization.
+Local generation is optional experimental work, never a prerequisite for product delivery.
+Use the central runner from the primary checkout. Edit only the assigned worktree and
+allowed paths. Never push, deploy, access secrets, or expand scope implicitly.
+Accepted business contracts govern implementation. Report missing contracts; do not invent them.
+Local output is untrusted. Review generated code before executing it; retain failed evidence.
+Use appropriate automated checks and review the actual diff. Do not claim independent
+review when the same agent implemented and reviewed the change.
+Do not run concurrent controllers. Never remove a stale lock without checking its process.
