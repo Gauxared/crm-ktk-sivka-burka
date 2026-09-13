@@ -1,0 +1,19 @@
+{
+  "id": "PUBLIC-001",
+  "title": "Expose public inquiry submission HTTP adapter and issue submission tokens",
+  "type": "implementation",
+  "status": "BACKLOG",
+  "priority": "high",
+  "executor": {"preferred": "cloud", "fallback": "cloud"},
+  "reviewer": "cloud",
+  "depends_on": ["APP-001", "DB-005", "PIPE-008"],
+  "allowed_paths": ["apps/api/**", "tests/api/**", "tests/integration/**", ".env.example", "docs/development-setup.md", "tasks/specs/PUBLIC-001.json"],
+  "forbidden_paths": [".env", ".env.*", "alembic/**", "apps/web/**", "apps/bots/**", "packages/**", "docs/api.md", "docs/database.md", "tasks/specs/ARCH-*.json", "tasks/specs/APP-*.json", "tasks/specs/DB-*.json"],
+  "context": ["AGENTS.md", "docs/development-pipeline.md", "docs/api.md", "docs/database.md", "apps/api/sivka_burka_api/inquiries.py", "apps/api/sivka_burka_api/main.py", "tasks/specs/DB-005.json"],
+  "requirements": ["Implement public token issuance and inquiry HTTP submission with accepted APP-001 transaction behavior.", "Inject HMAC material and rate-limit enforcement at runtime; missing dependencies fail closed and no production policy is invented.", "Add focused API and PostgreSQL integration tests with only synthetic configuration."],
+  "acceptance": ["Configured runtime issues only HMAC-digested one-time tokens and returns safe receipts.", "Replays and documented errors have stable, private responses without duplicate writes.", "Focused validation, scope, and whitespace checks pass."],
+  "validation": [{"name": "public API tests", "argv": ["{python}", "-m", "pytest", "tests/api", "-q"], "timeout": 120}, {"name": "public inquiry integration tests", "argv": ["{python}", "-m", "pytest", "tests/integration/test_app001_inquiry_command.py", "tests/integration/test_public_submission_api.py", "-q"], "timeout": 180}, {"name": "whitespace", "argv": ["git", "diff", "--check"], "timeout": 10}],
+  "risk": "high",
+  "retry_limit": 0,
+  "shared_paths_approval": {"paths": ["apps/api/**", "tests/api/**", "tests/integration/**", ".env.example", "docs/development-setup.md", "tasks/specs/PUBLIC-001.json"], "reviewer": "cloud:codex", "reason": "User-authorized public HTTP vertical slice; rate-limit policy remains external and fail-closed."}
+}
