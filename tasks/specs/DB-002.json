@@ -1,0 +1,19 @@
+{
+  "id": "DB-002",
+  "title": "Persist contacts and inquiry terms without workflow commands",
+  "type": "implementation",
+  "status": "BACKLOG",
+  "priority": "high",
+  "executor": {"preferred": "cloud", "fallback": "cloud"},
+  "reviewer": "cloud",
+  "depends_on": ["DB-001", "ARCH-003", "ARCH-005", "ARCH-006"],
+  "allowed_paths": ["alembic/**", "tests/integration/**", "docs/development-setup.md", "tasks/specs/DB-002.json"],
+  "forbidden_paths": [".env", ".env.*", "apps/api/sivka_burka_api/main.py", "apps/web/**", "apps/bot/**", "apps/admin/**", "packages/**"],
+  "context": ["docs/database.md", "docs/domain-model.md", "docs/api.md", "docs/development-pipeline.md"],
+  "requirements": ["Add one Alembic revision for contact_cards, channel_identities, inquiries and inquiry_terms using the accepted names, UUID keys, statuses, source/channel and experience constraints, snapshots, requested-time representation, money bounds and foreign keys.", "Enforce one inquiry_terms row per inquiry and the required consistency between selected service option, positive participants, optional positive duration, and nullable agreed totals/prepayment.", "Keep current contact fields on the inquiry beside immutable JSONB contact and selection snapshots; do not create endpoints, commands, visits, cash notes, receipts, drafts, authentication or channel adapters.", "Extend PostgreSQL integration coverage for identity uniqueness, invalid inquiry/term values, and a legal NEW inquiry with unknown agreed price."],
+  "acceptance": ["A clean database reaches the DB-002 Alembic head, retaining the DB-001 guard/catalog tables.", "The integration test proves database rejection for at least one invalid enum, one non-positive participant count, one invalid money value and duplicate channel identity.", "No public, owner or bot behavior becomes callable."],
+  "validation": [{"name": "API unit tests", "argv": ["{python}", "-m", "pytest", "tests/api", "-q"], "timeout": 60}, {"name": "PostgreSQL integration tests", "argv": ["{python}", "-m", "pytest", "tests/integration", "-q"], "timeout": 120}, {"name": "Alembic current", "argv": ["{python}", "-m", "alembic", "-c", "alembic.ini", "current"], "timeout": 30}, {"name": "whitespace", "argv": ["git", "diff", "--check"], "timeout": 10}],
+  "risk": "high",
+  "retry_limit": 0,
+  "shared_paths_approval": {"paths": ["alembic/**", "tests/integration/**", "docs/development-setup.md", "tasks/specs/DB-002.json"], "reviewer": "cloud:codex", "reason": "The user authorized continued implementation; DB-002 follows the accepted schema after the verified catalog baseline and introduces no externally callable workflow."}
+}
