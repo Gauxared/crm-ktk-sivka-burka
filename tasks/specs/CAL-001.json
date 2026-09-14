@@ -1,0 +1,54 @@
+{
+  "id": "CAL-001",
+  "title": "Expose owner-only visit calendar and detail read model",
+  "type": "implementation",
+  "status": "BACKLOG",
+  "priority": "high",
+  "executor": {"preferred": "cloud", "fallback": "cloud"},
+  "reviewer": "cloud",
+  "depends_on": ["ADMIN-001", "AUTH-003", "DB-003", "DB-005", "DB-007"],
+  "allowed_paths": [
+    "apps/api/sivka_burka_api/admin_visits.py",
+    "apps/api/sivka_burka_api/main.py",
+    "tests/admin_visits/**",
+    "tasks/specs/CAL-001.json"
+  ],
+  "forbidden_paths": [
+    ".env", ".env.*", "alembic/**", "apps/api/sivka_burka_api/admin_sessions.py",
+    "apps/api/sivka_burka_api/admin_inquiries.py", "apps/api/sivka_burka_api/inquiries.py",
+    "apps/api/sivka_burka_api/public_submission.py", "apps/api/sivka_burka_api/public_catalog.py",
+    "apps/api/sivka_burka_api/owner_commands.py", "apps/web/**", "docs/**", "scripts/**",
+    "pyproject.toml", "apps/bots/**", "packages/**"
+  ],
+  "context": [
+    "AGENTS.md", "docs/development-pipeline.md", "docs/api.md", "docs/database.md",
+    "docs/booking-flow.md", "apps/api/sivka_burka_api/main.py",
+    "apps/api/sivka_burka_api/admin_inquiries.py", "tests/admin_inquiries/test_postgres_integration.py"
+  ],
+  "requirements": [
+    "Add an explicitly injected owner-only visit read runtime and GET /api/v1/admin/visits plus GET /api/v1/admin/visits/{id}. Both endpoints use the existing valid owner session boundary, return 401 AUTH_REQUIRED without CRM data for an absent or invalid session, are read-only and do not require CSRF. Do not add a production runtime composition.",
+    "The calendar list requires UTC from and to moments, uses from inclusive and to exclusive, rejects a malformed, empty or reversed interval as INVALID_REQUEST, and returns 422 RANGE_TOO_LARGE when the interval exceeds 93 days. It supports an opaque cursor bound to from/to and limit with default 50 and range 1..100. Stable ascending start_at/id order and limit-plus-one pagination are required.",
+    "Select visits that intersect the requested interval rather than only visits that start inside it. A visit with known duration intersects when start_at < to and end_at > from. A visit with unknown duration is selected by start_at in the interval and is returned with end_at null; no end time may be invented.",
+    "Each VisitSummary contains exactly id, version, status, service_title, start_at, duration_minutes, end_at, inquiry_count, participants_count and has_unresolved_inquiries. Count only current participations (closed_at is null); participants_count is their summed inquiry_terms participants_count; has_unresolved_inquiries is true when a current participation has an inquiry status other than COMPLETED or CANCELLED. Do not expose contacts, comments, cash-note lines, catalog internals or allowed commands in the list.",
+    "Visit detail returns a consistent owner-only projection of the plan and every current participation: participation id, inquiry id/version/status, participants_count, requester_name and calculated effective-cash summary, plus allowed_commands as an empty list until write handlers exist. Unknown or malformed IDs return 404 without a database error body. Do not silently truncate participations.",
+    "Read every list page and detail through a PostgreSQL READ ONLY REPEATABLE READ transaction. Reuse the accepted effective-cash semantics: only non-superseded notes count, and a return larger than receipts gives calculation_warning DATA_REVIEW_REQUIRED without writing an aggregate.",
+    "Add synthetic PostgreSQL integration tests for session protection, range intersection including unknown duration, 93-day guard, cursor/filter binding, summary privacy and counts, detail participation/cash data, and 404. Tests create isolated random databases and never read a local .env or use a configured source database.",
+    "Do not add visit or inquiry writes, status commands, payment integrations, catalog editing, frontend calendar assets, bot adapters, secrets or external calls."
+  ],
+  "acceptance": [
+    "A signed-in owner can read an accurate paged calendar and open a visit card with its current group composition; a visitor cannot obtain these data.",
+    "Calendar intervals faithfully represent known and unknown duration facts and do not mix a group composition or cash result from different database moments.",
+    "Focused isolated PostgreSQL tests, scope and whitespace checks pass."
+  ],
+  "validation": [
+    {"name": "CAL-001 tests", "argv": ["{python}", "-m", "pytest", "tests/admin_visits", "-q"], "timeout": 180},
+    {"name": "whitespace", "argv": ["git", "diff", "--check"], "timeout": 10}
+  ],
+  "risk": "high",
+  "retry_limit": 0,
+  "shared_paths_approval": {
+    "paths": ["apps/api/sivka_burka_api/admin_visits.py", "apps/api/sivka_burka_api/main.py", "tests/admin_visits/**", "tasks/specs/CAL-001.json"],
+    "reviewer": "cloud:codex",
+    "reason": "Accepted owner-only calendar projection of existing visit, participation, inquiry and cash facts; it introduces no write path."
+  }
+}

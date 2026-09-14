@@ -1,0 +1,55 @@
+{
+  "id": "CMD-001",
+  "title": "Add transactional owner visit creation and inquiry confirmation core",
+  "type": "implementation",
+  "status": "BACKLOG",
+  "priority": "high",
+  "executor": {"preferred": "cloud", "fallback": "cloud"},
+  "reviewer": "cloud",
+  "depends_on": ["APP-001", "DB-003", "DB-004", "DB-005", "DB-007"],
+  "allowed_paths": [
+    "apps/api/sivka_burka_api/owner_commands.py",
+    "tests/owner_commands/**",
+    "tasks/specs/CMD-001.json"
+  ],
+  "forbidden_paths": [
+    ".env", ".env.*", "alembic/**", "apps/api/sivka_burka_api/main.py",
+    "apps/api/sivka_burka_api/admin_sessions.py", "apps/api/sivka_burka_api/admin_inquiries.py",
+    "apps/api/sivka_burka_api/admin_visits.py", "apps/api/sivka_burka_api/inquiries.py",
+    "apps/api/sivka_burka_api/public_submission.py", "apps/api/sivka_burka_api/public_catalog.py",
+    "apps/web/**", "docs/**", "scripts/**", "pyproject.toml", "apps/bots/**", "packages/**"
+  ],
+  "context": [
+    "AGENTS.md", "docs/development-pipeline.md", "docs/api.md", "docs/database.md",
+    "docs/booking-flow.md", "apps/api/sivka_burka_api/inquiries.py",
+    "alembic/versions/20260913_03_visits_and_participations.py",
+    "alembic/versions/20260913_04_idempotency_baseline.py",
+    "alembic/versions/20260913_05_audit_notification_outbox.py"
+  ],
+  "requirements": [
+    "Add an explicitly injected domain service for future authenticated owner HTTP handlers; it receives a trusted owner UUID, an injected Engine, an injected non-empty HMAC secret and positive digest-key version. This task exposes no route and must not compose a production runtime.",
+    "Implement create_planned_visit for the accepted POST /api/v1/admin/visits semantic payload: service_id, UTC start_at and duration_minutes (null or positive integer). It validates an active service, creates a PLANNED visit at version 1, and returns a deterministic result containing command_id and the created visit id/version/status.",
+    "Implement confirm_inquiry for the accepted CONFIRM semantic: inquiry_id, expected inquiry version, a complete expected version map containing the target PLANNED visit, and payload visit_id. It accepts only NEW or NEGOTIATING inquiries with no current participation, creates one current participation, moves the inquiry to CONFIRMED, increments both inquiry and visit versions, and returns command_id plus the changed inquiry and visit IDs/versions. It does not silently replace an existing current participation; such a request returns PARTICIPATION_CONFLICT for the later explicit MOVE workflow.",
+    "Both operations implement the accepted CRM idempotency protocol using operation_receipts: owner UUID + method + canonical path are the scope; normalized semantic payload is digested with the injected secret; identical completed replays return the original result without new mutation; a changed payload gives IDEMPOTENCY_MISMATCH; tombstoned/absent result gives RESULT_EXPIRED. Errors before acceptance do not consume a key. The visit creation canonical path is /api/v1/admin/visits and the confirmation canonical path is /api/v1/admin/inquiries/{inquiry_id}/commands.",
+    "For a new command, acquire business_write_guard first, then lock and compare every existing object against the supplied expected version before mutation. Missing expected inquiry/visit version is EXPECTED_VERSION_REQUIRED; a mismatch is VERSION_CONFLICT; invalid IDs, input, status or unavailable plan are a typed safe command error and leave all business tables unchanged. Confirmation must not require payment, total price or prepayment.",
+    "For each accepted first execution, store the receipt result and write an OWNER change_event linked to the receipt. Visit creation links an event_visits row; confirmation links both event_inquiries and event_visits rows. Record only safe structured before/after identifiers, status and versions in changes. Do not create notification delivery jobs in this narrow core because recipient policy and HTTP dispatch remain separate tasks.",
+    "Add isolated synthetic PostgreSQL integration tests for visit creation, active-service/input validation, confirmation from NEW and NEGOTIATING, exact expected-version behaviour, no implicit replacement, idempotent replay and mismatch, atomic rejection, receipt/event links and no payment prerequisite. Tests create isolated random databases and never read a local .env or use a configured source database.",
+    "Do not add HTTP handlers, session/CSRF changes, manual inquiry entry, update/move/complete/cancel commands, migration changes, payment mutations, notification delivery, frontend assets, bot adapters, secrets or external calls."
+  ],
+  "acceptance": [
+    "The first owner command core can create an empty planned group visit and explicitly confirm one eligible incoming inquiry without treating payment as a prerequisite.",
+    "Retries are safe and concurrency/version conflicts do not produce partial state or duplicate audit history.",
+    "Focused isolated PostgreSQL tests, scope and whitespace checks pass."
+  ],
+  "validation": [
+    {"name": "CMD-001 tests", "argv": ["{python}", "-m", "pytest", "tests/owner_commands", "-q"], "timeout": 180},
+    {"name": "whitespace", "argv": ["git", "diff", "--check"], "timeout": 10}
+  ],
+  "risk": "high",
+  "retry_limit": 0,
+  "shared_paths_approval": {
+    "paths": ["apps/api/sivka_burka_api/owner_commands.py", "tests/owner_commands/**", "tasks/specs/CMD-001.json"],
+    "reviewer": "cloud:codex",
+    "reason": "Accepted narrow transactional owner command core whose future HTTP composition is deliberately deferred, avoiding overlap with the independent calendar read task."
+  }
+}
