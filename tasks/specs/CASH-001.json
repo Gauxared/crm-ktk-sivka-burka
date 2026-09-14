@@ -1,0 +1,25 @@
+{
+  "id": "CASH-001",
+  "title": "Record owner manual cash notes with stable receipt results",
+  "type": "implementation",
+  "status": "BACKLOG",
+  "priority": "high",
+  "executor": {"preferred": "cloud", "fallback": "cloud"},
+  "reviewer": "cloud",
+  "depends_on": ["CMD-002", "DB-007", "AUTH-003"],
+  "allowed_paths": ["apps/api/sivka_burka_api/owner_commands.py", "tests/owner_commands/**", "tasks/specs/CASH-001.json"],
+  "forbidden_paths": [".env", ".env.*", "alembic/**", "apps/api/sivka_burka_api/main.py", "apps/api/sivka_burka_api/admin_sessions.py", "apps/api/sivka_burka_api/admin_commands.py", "apps/api/sivka_burka_api/admin_inquiries.py", "apps/api/sivka_burka_api/admin_visits.py", "apps/api/sivka_burka_api/inquiries.py", "apps/api/sivka_burka_api/public_submission.py", "apps/api/sivka_burka_api/public_catalog.py", "apps/web/**", "docs/**", "scripts/**", "pyproject.toml", "apps/bots/**", "packages/**"],
+  "context": ["AGENTS.md", "docs/development-pipeline.md", "docs/api.md", "docs/database.md", "docs/booking-flow.md", "apps/api/sivka_burka_api/owner_commands.py", "apps/api/sivka_burka_api/admin_inquiries.py", "tests/owner_commands/test_owner_commands_postgres.py", "tests/db007/test_cash_notes.py"],
+  "requirements": [
+    "Add only a transactional OwnerCommandService.record_cash_note owner command for the documented semantic payload: expected_version, kind RECEIPT|REFUND_NOTE, positive integer amount_minor, UTC occurred_at and non-empty note. It records a manual fact only; it does not send money, infer payment, calculate a refund, alter agreed terms, or change inquiry/visit workflow status.",
+    "Lock business_write_guard then the inquiry and its current participation/visit. The inquiry expected_version is always required. If an active participation exists, require expected_visit_versions to contain exactly that visit id and its current positive version; without active participation, omit expected_visit_versions or supply an empty mapping. Stale/missing versions reject before mutation. The command remains permitted for every persisted inquiry status, including COMPLETED and CANCELLED.",
+    "On first acceptance insert exactly one immutable cash_notes record in RUB using the trusted owner_id and server recorded_at, increment inquiry version and the current visit version when present, create one OWNER change_event and receipt links for the inquiry and current visit. Store and return a complete stable result {command_id,inquiry,changed_visits}; snapshot it in operation_receipts.result_json and replay it without rereading later cash facts. Use the canonical path /api/v1/admin/inquiries/{id}/cash-notes.",
+    "Preserve existing receipt semantics: owner scope, HMAC digests, identical replay without duplicate note/event/version changes, changed payload IDEMPOTENCY_MISMATCH, tombstoned or malformed result RESULT_EXPIRED, and rejected requests do not consume the key. Map safe domain failures as typed OwnerCommandError only; no diagnostics or new persistence schema.",
+    "Add isolated disposable PostgreSQL tests for RECEIPT and REFUND_NOTE, every inquiry state, positive/RUB/UTC/body validation, active and unplanned version behaviour, atomic version conflicts, stable receipt replay after later cash facts, expired/mismatch, one note/audit/receipt links, and no payment or status prerequisite. Never read local .env or a configured database.",
+    "Do not add HTTP routes, corrections, payments integration, checkout, webhooks, invoices, notifications, production composition, migrations, frontend assets, bot adapters, secrets or external calls."
+  ],
+  "acceptance": ["The owner command can record a factual receipt or refund note without blocking confirmation or completion and returns a stable full CRM card result.", "Version, receipt and audit rules prevent partial cash mutations or duplicate recorded facts.", "Focused isolated PostgreSQL tests, scope and whitespace checks pass."],
+  "validation": [{"name":"CASH-001 tests","argv":["{python}","-m","pytest","tests/owner_commands","-q"],"timeout":180},{"name":"whitespace","argv":["git","diff","--check"],"timeout":10}],
+  "risk": "high", "retry_limit": 0,
+  "shared_paths_approval": {"paths":["apps/api/sivka_burka_api/owner_commands.py","tests/owner_commands/**","tasks/specs/CASH-001.json"],"reviewer":"cloud:codex","reason":"Accepted manual financial-fact command over the existing append-only cash schema; it creates no payment execution, status transition or public surface."}
+}
