@@ -12,6 +12,17 @@ class WebContractTests(unittest.TestCase):
         for s in ('service_option_id','name','contact_kind','contact_value','participants_count','date','experience','comment'):
             self.assertIn(f'name="{s}"', HTML)
 
+    def test_envelopes_nested_options_and_retry_identity(self):
+        for s in ('apiData', 'payload.data', 'services.flatMap', 'service.options', 'submission_token', 'receipt.received', 'idempotencyKey'):
+            self.assertIn(s, JS)
+        self.assertIn("catalog?.catalog_version", JS)
+        self.assertIn("o.id", JS)
+
+    def test_catalog_driven_rules_and_location(self):
+        for s in ('visit_rules', 'location_link', 'Правила визита', 'Открыть расположение'):
+            self.assertIn(s, JS)
+        self.assertIn('id="location"', HTML)
+
     def test_required_non_gate_information(self):
         for s in ('инструктаж','новичк','дет','галоп','110 кг','не автоматический'):
             self.assertIn(s.lower(), HTML.lower())
