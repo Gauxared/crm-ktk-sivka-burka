@@ -2,10 +2,10 @@
 
 import hmac
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Query, Request
 from fastapi.responses import JSONResponse
 
 from .inquiries import (
@@ -20,6 +20,7 @@ from .public_submission import PublicSubmissionRuntime, SubmissionRateLimitError
 from .public_catalog import PublicCatalogRuntime, PublicCatalogUnavailable
 from .admin_sessions import AdminSessionRuntime, COOKIE_NAME, LoginRateLimited
 from .admin_inquiries import AdminInquiryReadRuntime, AdminInquiryReader, InvalidInquiryCursor
+from .admin_visits import AdminVisitReadRuntime, AdminVisitReader, InvalidVisitCursor
 from .settings import load_settings
 
 
@@ -83,7 +84,7 @@ def _map_command_error(error: InquiryCommandError) -> JSONResponse:
     return _error("INVALID_REQUEST", 400)
 
 
-def create_app(*, public_submission_runtime: PublicSubmissionRuntime | None = None, public_catalog_runtime: PublicCatalogRuntime | None = None, admin_session_runtime: AdminSessionRuntime | None = None, admin_inquiry_read_runtime: AdminInquiryReadRuntime | None = None) -> FastAPI:
+def create_app(*, public_submission_runtime: PublicSubmissionRuntime | None = None, public_catalog_runtime: PublicCatalogRuntime | None = None, admin_session_runtime: AdminSessionRuntime | None = None, admin_inquiry_read_runtime: AdminInquiryReadRuntime | None = None, admin_visit_read_runtime: AdminVisitReadRuntime | None = None) -> FastAPI:
     settings = load_settings()
     app = FastAPI(title="Sivka-Burka API", version="0.1.0")
 
@@ -173,6 +174,34 @@ def create_app(*, public_submission_runtime: PublicSubmissionRuntime | None = No
             return _error("ADMIN_INQUIRIES_UNAVAILABLE", 503)
         return AdminInquiryReader(admin_inquiry_read_runtime)
 
+    def owner_visit_read_runtime(request: Request) -> AdminVisitReader | JSONResponse:
+        session_runtime = admin_runtime()
+        if isinstance(session_runtime, JSONResponse):
+            return session_runtime
+        token = request.cookies.get(COOKIE_NAME)
+        if not token:
+            return private_unauthorized()
+        try:
+            session = session_runtime.active_session(token)
+        except Exception:
+            return private_unauthorized()
+        if session is None:
+            return private_unauthorized()
+        if admin_visit_read_runtime is None:
+            return _error("ADMIN_VISITS_UNAVAILABLE", 503)
+        return AdminVisitReader(admin_visit_read_runtime)
+
+    def utc_moment(value: str | None) -> datetime | None:
+        if not value:
+            return None
+        try:
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+        if parsed.tzinfo is None or parsed.utcoffset() != timezone.utc.utcoffset(parsed):
+            return None
+        return parsed.astimezone(timezone.utc)
+
     @app.get("/api/v1/admin/inquiries", tags=["admin"])
     def list_admin_inquiries(request: Request, status: str | None = None, has_visit: bool | None = None, channel: str | None = None, cursor: str | None = None, limit: int = 50) -> JSONResponse:
         runtime = owner_read_runtime(request)
@@ -193,6 +222,37 @@ def create_app(*, public_submission_runtime: PublicSubmissionRuntime | None = No
             return runtime
         try:
             result = runtime.detail(UUID(inquiry_id))
+        except ValueError:
+            return _error("NOT_FOUND", 404)
+        if result is None:
+            return _error("NOT_FOUND", 404)
+        return JSONResponse({"data": result}, headers=_NO_STORE)
+
+    @app.get("/api/v1/admin/visits", tags=["admin"])
+    def list_admin_visits(request: Request, from_at: str | None = Query(None, alias="from"), to_at: str | None = Query(None, alias="to"), cursor: str | None = None, limit: int = 50) -> JSONResponse:
+        runtime = owner_visit_read_runtime(request)
+        if isinstance(runtime, JSONResponse):
+            return runtime
+        from_moment, to_moment = utc_moment(from_at), utc_moment(to_at)
+        if from_moment is None or to_moment is None or from_moment >= to_moment:
+            return _error("INVALID_REQUEST", 400)
+        if to_moment - from_moment > timedelta(days=93):
+            return _error("RANGE_TOO_LARGE", 422)
+        if not 1 <= limit <= 100:
+            return _error("INVALID_REQUEST", 400)
+        try:
+            result = runtime.list(from_at=from_moment, to_at=to_moment, cursor=cursor, limit=limit)
+        except InvalidVisitCursor:
+            return _error("INVALID_REQUEST", 400)
+        return JSONResponse({"data": result}, headers=_NO_STORE)
+
+    @app.get("/api/v1/admin/visits/{visit_id}", tags=["admin"])
+    def read_admin_visit(visit_id: str, request: Request) -> JSONResponse:
+        runtime = owner_visit_read_runtime(request)
+        if isinstance(runtime, JSONResponse):
+            return runtime
+        try:
+            result = runtime.detail(UUID(visit_id))
         except ValueError:
             return _error("NOT_FOUND", 404)
         if result is None:
