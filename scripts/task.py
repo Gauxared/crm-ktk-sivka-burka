@@ -314,10 +314,10 @@ class Pipeline:
         current, paths = snapshot(wt, r['base'], r['task'])
         require(current == r['review']['snapshot'] == r['validation']['snapshot'], 'Changes after review; validate/review again')
         require(bool(paths), 'Nothing to merge')
-        # A scope-validated snapshot can include the deleted source half of a
-        # rename.  `git add` rejects that vanished path; `-A` stages its
-        # deletion and the corresponding addition without expanding paths.
-        git(wt, 'add', '-A', '--', *paths)
+        # The current snapshot has already been scope-validated and sealed.
+        # Stage it as a whole so Git handles both halves of an uncommitted
+        # rename, while a rename committed by the executor needs no pathspec.
+        git(wt, 'add', '-A', '--', '.')
         if git(wt, 'diff', '--cached', '--name-only'):
             git(wt, 'commit', '-m', f"{task_id}: {r['task']['title']}\n\nExecutor: {r['executor']}\nReviewer: {r['review']['reviewer']}")
         commit = git(wt, 'rev-parse', 'HEAD')
