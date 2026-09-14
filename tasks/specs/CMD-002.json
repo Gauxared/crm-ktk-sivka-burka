@@ -1,0 +1,53 @@
+{
+  "id": "CMD-002",
+  "title": "Persist a stable inquiry-confirmation result for HTTP composition",
+  "type": "implementation",
+  "status": "BACKLOG",
+  "priority": "high",
+  "executor": {"preferred": "cloud", "fallback": "cloud"},
+  "reviewer": "cloud",
+  "depends_on": ["CMD-001", "ADMIN-001", "DB-005"],
+  "allowed_paths": [
+    "apps/api/sivka_burka_api/owner_commands.py",
+    "apps/api/sivka_burka_api/admin_inquiries.py",
+    "tests/owner_commands/**",
+    "tasks/specs/CMD-002.json"
+  ],
+  "forbidden_paths": [
+    ".env", ".env.*", "alembic/**", "apps/api/sivka_burka_api/main.py",
+    "apps/api/sivka_burka_api/admin_sessions.py", "apps/api/sivka_burka_api/admin_commands.py",
+    "apps/api/sivka_burka_api/admin_visits.py", "apps/api/sivka_burka_api/inquiries.py",
+    "apps/api/sivka_burka_api/public_submission.py", "apps/api/sivka_burka_api/public_catalog.py",
+    "apps/web/**", "docs/**", "scripts/**", "pyproject.toml", "apps/bots/**", "packages/**"
+  ],
+  "context": [
+    "AGENTS.md", "docs/development-pipeline.md", "docs/api.md", "docs/database.md",
+    "apps/api/sivka_burka_api/owner_commands.py", "apps/api/sivka_burka_api/admin_inquiries.py",
+    "tests/owner_commands/test_owner_commands_postgres.py",
+    "tests/admin_inquiries/test_postgres_integration.py"
+  ],
+  "requirements": [
+    "Extend only the existing confirm_inquiry command result so the accepted first execution stores and returns the documented stable owner response: command_id, inquiry as the complete updated InquiryDetail projection, and changed_visits containing exactly the confirmed visit id and post-command version. The response shape must be identical for the first execution and an accepted idempotent replay.",
+    "Build the InquiryDetail projection from the same PostgreSQL transaction after the confirmation mutation and before committing its receipt. Reuse or safely extract the established AdminInquiryReader projection semantics instead of creating a divergent private representation: contact snapshots, current contact, selected option, agreed terms, participation, cash notes/effective cash summary, notification summary and allowed_commands follow the existing owner-only detail contract.",
+    "Persist the complete stable confirmation response in operation_receipts.result_json. On a matching replay, deserialize and return that stored response without rereading current inquiry, visit, cash or notification state. A tombstoned or incomplete stored result remains RESULT_EXPIRED; a changed payload remains IDEMPOTENCY_MISMATCH.",
+    "Preserve all accepted CMD-001 transaction guarantees: business_write_guard and locks precede mutation, expected versions and plan compatibility are checked, rejected commands leave business tables and receipt identity unchanged, exactly one participation/audit event is created for first acceptance, and no payment prerequisite, notification delivery, migration or external call is introduced.",
+    "Add isolated synthetic PostgreSQL coverage for first confirmation from NEW and NEGOTIATING, complete returned InquiryDetail and changed visit version, byte-for-byte-equivalent structured first/replay result after later persisted read-model facts change, receipt persistence, expired receipt, mismatch, and atomic rejection. Tests create random disposable databases and never read a local .env or use a configured source database.",
+    "Do not add HTTP routes, session or CSRF behavior, new command types, manual inquiry entry, payment commands, catalog changes, production runtime composition, frontend assets, bot adapters, migrations, secrets or external calls."
+  ],
+  "acceptance": [
+    "A future authenticated HTTP adapter can return the complete documented confirmation result directly from the command result, including a replay that remains stable after later database changes.",
+    "Confirmation remains atomic, idempotent and independent from payment; detail projection does not weaken owner-only data boundaries.",
+    "Focused isolated PostgreSQL tests, scope and whitespace checks pass."
+  ],
+  "validation": [
+    {"name": "CMD-002 tests", "argv": ["{python}", "-m", "pytest", "tests/owner_commands", "tests/admin_inquiries", "-q"], "timeout": 180},
+    {"name": "whitespace", "argv": ["git", "diff", "--check"], "timeout": 10}
+  ],
+  "risk": "high",
+  "retry_limit": 0,
+  "shared_paths_approval": {
+    "paths": ["apps/api/sivka_burka_api/owner_commands.py", "apps/api/sivka_burka_api/admin_inquiries.py", "tests/owner_commands/**", "tasks/specs/CMD-002.json"],
+    "reviewer": "cloud:codex",
+    "reason": "Accepted prerequisite for the documented stable owner confirmation response. It extends the existing transactional receipt and reuses the already authenticated inquiry projection without exposing a new route."
+  }
+}
