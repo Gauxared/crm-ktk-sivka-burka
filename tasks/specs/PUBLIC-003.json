@@ -1,0 +1,47 @@
+{
+  "id": "PUBLIC-003",
+  "title": "Align public catalog option identity with inquiry submission",
+  "type": "implementation",
+  "status": "BACKLOG",
+  "priority": "high",
+  "executor": {"preferred": "cloud", "fallback": "cloud"},
+  "reviewer": "cloud",
+  "depends_on": ["APP-001", "PUBLIC-001", "PUBLIC-002"],
+  "allowed_paths": [
+    "apps/api/sivka_burka_api/inquiries.py",
+    "tests/integration/test_public_submission_api.py",
+    "tests/integration/test_app001_inquiry_command.py",
+    "tasks/specs/PUBLIC-003.json"
+  ],
+  "forbidden_paths": [
+    ".env", ".env.*", "apps/api/sivka_burka_api/main.py", "apps/api/sivka_burka_api/public_catalog.py",
+    "alembic/**", "apps/web/**", "docs/**", "scripts/**", "pyproject.toml", "apps/bots/**", "packages/**"
+  ],
+  "context": [
+    "AGENTS.md", "docs/development-pipeline.md", "docs/api.md", "apps/api/sivka_burka_api/inquiries.py",
+    "apps/api/sivka_burka_api/public_catalog.py", "tests/integration/test_public_catalog_api.py",
+    "tests/integration/test_public_submission_api.py", "tests/integration/test_app001_inquiry_command.py"
+  ],
+  "requirements": [
+    "Make the service_option_id published by GET /api/v1/public/catalog directly usable by POST /api/v1/public/inquiries. The published UUID string is the public opaque identifier; do not expose or accept the internal service option code as an alternative public identifier.",
+    "Preserve the current transactional snapshots, catalog availability checks, idempotency and token semantics. A valid public catalog option ID is accepted; an unknown, malformed or inactive ID returns the existing OPTION_UNAVAILABLE result without creating an inquiry, receipt or token consumption.",
+    "Update synthetic PostgreSQL integration coverage to fetch or use the public UUID option ID for a successful submission, and prove that the legacy code string is rejected with no mutation. Tests use isolated random databases only and never read a local .env or configured source database.",
+    "Do not add routes, migrations, catalog fields, compatibility aliases, secrets, runtime composition, frontend changes or external calls."
+  ],
+  "acceptance": [
+    "A browser can submit exactly the option it received from the public catalog without knowing database implementation codes.",
+    "Invalid or legacy option identifiers leave public submission persistence unchanged.",
+    "Focused PostgreSQL integration tests, scope and whitespace checks pass."
+  ],
+  "validation": [
+    {"name": "PUBLIC-003 integration tests", "argv": ["{python}", "-m", "pytest", "tests/integration/test_public_submission_api.py", "tests/integration/test_app001_inquiry_command.py", "-q"], "timeout": 180},
+    {"name": "whitespace", "argv": ["git", "diff", "--check"], "timeout": 10}
+  ],
+  "risk": "high",
+  "retry_limit": 0,
+  "shared_paths_approval": {
+    "paths": ["apps/api/sivka_burka_api/inquiries.py", "tests/integration/test_public_submission_api.py", "tests/integration/test_app001_inquiry_command.py", "tasks/specs/PUBLIC-003.json"],
+    "reviewer": "cloud:codex",
+    "reason": "Contract repair required for the public catalog and inquiry endpoints to interoperate using the accepted opaque option identifier."
+  }
+}
