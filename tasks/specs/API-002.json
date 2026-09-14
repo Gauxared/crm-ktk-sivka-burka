@@ -1,0 +1,54 @@
+{
+  "id": "API-002",
+  "title": "Expose authenticated owner inquiry confirmation",
+  "type": "implementation",
+  "status": "BACKLOG",
+  "priority": "high",
+  "executor": {"preferred": "cloud", "fallback": "cloud"},
+  "reviewer": "cloud",
+  "depends_on": ["AUTH-003", "CMD-001", "CMD-002", "API-001"],
+  "allowed_paths": [
+    "apps/api/sivka_burka_api/main.py",
+    "tests/admin_commands/**",
+    "tasks/specs/API-002.json"
+  ],
+  "forbidden_paths": [
+    ".env", ".env.*", "alembic/**", "apps/api/sivka_burka_api/admin_sessions.py",
+    "apps/api/sivka_burka_api/admin_commands.py", "apps/api/sivka_burka_api/owner_commands.py",
+    "apps/api/sivka_burka_api/admin_inquiries.py", "apps/api/sivka_burka_api/admin_visits.py",
+    "apps/api/sivka_burka_api/inquiries.py", "apps/api/sivka_burka_api/public_submission.py",
+    "apps/api/sivka_burka_api/public_catalog.py", "apps/web/**", "docs/**", "scripts/**",
+    "pyproject.toml", "apps/bots/**", "packages/**"
+  ],
+  "context": [
+    "AGENTS.md", "docs/development-pipeline.md", "docs/api.md", "docs/database.md",
+    "apps/api/sivka_burka_api/main.py", "apps/api/sivka_burka_api/admin_commands.py",
+    "apps/api/sivka_burka_api/owner_commands.py", "apps/api/sivka_burka_api/admin_sessions.py",
+    "tests/admin_commands/test_admin_visit_create_postgres.py",
+    "tests/owner_commands/test_owner_commands_postgres.py"
+  ],
+  "requirements": [
+    "Expose POST /api/v1/admin/inquiries/{inquiry_id}/commands for exactly one accepted command envelope: {type:'CONFIRM', expected_version, expected_visit_versions, payload:{visit_id}}. It adapts the injected AdminCommandRuntime and existing OwnerCommandService.confirm_inquiry; do not add other command types or change the core command contract.",
+    "Require a valid owner session, exact trusted Origin, application/json, session-matching X-CSRF-Token and Idempotency-Key before command execution. Preserve the existing administrative boundary semantics: invalid or missing session yields 401 AUTH_REQUIRED, bad origin 403 FORBIDDEN, missing or bad CSRF 403 CSRF_FAILED, and a non-JSON body 415 UNSUPPORTED_MEDIA_TYPE. Every response has Cache-Control: no-store.",
+    "Reject any body other than the strict CONFIRM envelope with 422 VALIDATION_ERROR before delegating, without consuming the idempotency key. On first acceptance return 200 {data:{command_id,inquiry,changed_visits}} from the complete receipt-backed CMD-002 result. An identical accepted replay returns the same data, 200 and Idempotent-Replay: true without a new participation, receipt or audit event.",
+    "Map safe command outcomes without diagnostic text: NOT_FOUND to 404, IDEMPOTENCY_MISMATCH, VERSION_CONFLICT, PLAN_CONFLICT and PARTICIPATION_CONFLICT to 409, RESULT_EXPIRED to 410, EXPECTED_VERSION_REQUIRED, INVALID_TRANSITION, VALIDATION_ERROR, OPTION_UNAVAILABLE and other unsupported command input to 422. Malformed inquiry path returns 404.",
+    "Add focused route-contract and isolated synthetic PostgreSQL coverage for session/origin/CSRF/media boundaries, strict envelope/type, missing idempotency key, invalid inquiry/visit, missing or mismatched expected versions, incompatible service/duration plan, first confirmation from NEW and NEGOTIATING, complete response, stable replay after later persisted read-model changes, expiry/mismatch, and persistence/audit boundaries. Tests create random disposable databases and never read a local .env or use a configured source database.",
+    "Do not add other inquiry or visit commands, manual inquiry entry, payment mutations, notification delivery, catalog changes, production runtime composition, frontend assets, bot adapters, migrations, external calls or secrets."
+  ],
+  "acceptance": [
+    "A signed-in owner can explicitly confirm one eligible incoming inquiry into a compatible planned visit and receive the complete documented inquiry result.",
+    "Browser-state checks, idempotency, versions and plan validation protect the command before any partial CRM mutation; retries remain stable.",
+    "Focused isolated PostgreSQL tests, scope and whitespace checks pass."
+  ],
+  "validation": [
+    {"name": "API-002 tests", "argv": ["{python}", "-m", "pytest", "tests/admin_commands", "-q"], "timeout": 180},
+    {"name": "whitespace", "argv": ["git", "diff", "--check"], "timeout": 10}
+  ],
+  "risk": "high",
+  "retry_limit": 0,
+  "shared_paths_approval": {
+    "paths": ["apps/api/sivka_burka_api/main.py", "tests/admin_commands/**", "tasks/specs/API-002.json"],
+    "reviewer": "cloud:codex",
+    "reason": "Accepted second owner HTTP write endpoint. It exposes only the reviewed confirmation core and complete receipt-backed result behind the established session, origin and CSRF boundary."
+  }
+}
