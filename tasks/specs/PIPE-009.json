@@ -1,0 +1,33 @@
+{
+  "id": "PIPE-009",
+  "title": "Allow pipeline finish to stage a reviewed rename",
+  "type": "implementation",
+  "status": "BACKLOG",
+  "priority": "high",
+  "executor": {"preferred": "cloud", "fallback": "cloud"},
+  "reviewer": "cloud",
+  "depends_on": ["PIPE-007"],
+  "allowed_paths": ["scripts/task.py", "tests/pipeline/test_pipeline.py", "tasks/specs/PIPE-009.json"],
+  "forbidden_paths": [".env", ".env.*", "apps/**", "alembic/**", "docs/**", "packages/**"],
+  "context": ["AGENTS.md", "docs/development-pipeline.md", "scripts/task.py", "scripts/policy.py", "tests/pipeline/test_pipeline.py"],
+  "requirements": [
+    "Repair Pipeline.finish so the validated allowed-path rename of a tracked file can be staged and merged. It must stage additions, modifications and deletions described by the already scope-validated snapshot; it must not broaden the task's allowed paths or bypass validation/review/base checks.",
+    "Add a regression test that creates a task with a committed file rename in its approved path, validates and reviews it, then proves finish merges the rename successfully. Preserve existing finish coverage and runner invariants.",
+    "Do not change product code, task-state recovery data, environment handling, integrations or documentation."
+  ],
+  "acceptance": [
+    "A reviewed rename can complete through the same controller path as a normal change, and out-of-scope files remain excluded.",
+    "The full pipeline test suite and whitespace check pass."
+  ],
+  "validation": [
+    {"name": "pipeline tests", "argv": ["{python}", "-m", "pytest", "tests/pipeline", "-q"], "timeout": 90},
+    {"name": "whitespace", "argv": ["git", "diff", "--check"], "timeout": 10}
+  ],
+  "risk": "medium",
+  "retry_limit": 0,
+  "shared_paths_approval": {
+    "paths": ["scripts/task.py", "tests/pipeline/test_pipeline.py", "tasks/specs/PIPE-009.json"],
+    "reviewer": "cloud:codex",
+    "reason": "Lead regression revealed that the controller correctly validates a rename but cannot stage its deleted source path during finish."
+  }
+}
