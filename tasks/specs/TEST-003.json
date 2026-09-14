@@ -1,0 +1,32 @@
+{
+  "id": "TEST-003",
+  "title": "Make calendar and inquiry PostgreSQL suites collect together",
+  "type": "implementation",
+  "status": "BACKLOG",
+  "priority": "high",
+  "executor": {"preferred": "cloud", "fallback": "cloud"},
+  "reviewer": "cloud",
+  "depends_on": ["ADMIN-001", "CAL-001"],
+  "allowed_paths": ["tests/admin_visits/**", "tasks/specs/TEST-003.json"],
+  "forbidden_paths": [".env", ".env.*", "alembic/**", "apps/**", "tests/admin_inquiries/**", "tests/api/**", "tests/integration/**", "docs/**", "packages/**", "scripts/**"],
+  "context": ["AGENTS.md", "docs/development-pipeline.md", "tests/admin_inquiries/test_postgres_integration.py", "tests/admin_visits/test_postgres_integration.py"],
+  "requirements": [
+    "Rename or otherwise uniquely identify the CAL-001 PostgreSQL test module so pytest can collect it in one invocation with tests/admin_inquiries/test_postgres_integration.py. Preserve every existing calendar test assertion and its isolated synthetic database fixture.",
+    "Prove the repair by running pytest over both admin_inquiries and admin_visits directories in one invocation. Do not alter application code, inquiry tests, database migrations, configuration, test data semantics or external integrations."
+  ],
+  "acceptance": [
+    "The combined owner inquiry and calendar PostgreSQL test invocation collects both files and passes without an import-file mismatch.",
+    "Focused combined tests and whitespace checks pass with only the calendar test path and task-spec changes."
+  ],
+  "validation": [
+    {"name": "combined owner read tests", "argv": ["{python}", "-m", "pytest", "tests/admin_inquiries", "tests/admin_visits", "-q"], "timeout": 180},
+    {"name": "whitespace", "argv": ["git", "diff", "--check"], "timeout": 10}
+  ],
+  "risk": "low",
+  "retry_limit": 0,
+  "shared_paths_approval": {
+    "paths": ["tests/admin_visits/**", "tasks/specs/TEST-003.json"],
+    "reviewer": "cloud:codex",
+    "reason": "Lead regression detected a duplicate pytest module basename; this narrowly repairs test collection without changing product behavior."
+  }
+}
