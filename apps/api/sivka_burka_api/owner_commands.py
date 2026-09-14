@@ -132,15 +132,26 @@ class OwnerCommandService:
             replay = self._replay(connection, path, key_digest, payload_digest)
             if replay is not None:
                 return InquiryConfirmed(UUID(replay["command_id"]), UUID(replay["inquiry_id"]), int(replay["inquiry_version"]), UUID(replay["visit_id"]), int(replay["visit_version"]), True)
-            inquiry = connection.execute(text("SELECT id, status, version FROM inquiries WHERE id = :id FOR UPDATE"), {"id": target_inquiry_id}).mappings().one_or_none()
+            inquiry = connection.execute(text("""SELECT i.id, i.status, i.version,
+                       so.service_id AS selected_service_id, t.duration_minutes AS agreed_duration_minutes
+                       FROM inquiries i
+                       JOIN inquiry_terms t ON t.inquiry_id = i.id
+                       JOIN service_options so ON so.id = t.service_option_id
+                       WHERE i.id = :id FOR UPDATE"""), {"id": target_inquiry_id}).mappings().one_or_none()
             if inquiry is None:
                 raise OwnerCommandError("NOT_FOUND")
             visit_id = UUID(normalized["payload"]["visit_id"])
-            visit = connection.execute(text("SELECT id, status, version FROM visits WHERE id = :id FOR UPDATE"), {"id": visit_id}).mappings().one_or_none()
+            visit = connection.execute(text("SELECT id, service_id, status, version, duration_minutes FROM visits WHERE id = :id FOR UPDATE"), {"id": visit_id}).mappings().one_or_none()
             if visit is None:
                 raise OwnerCommandError("NOT_FOUND")
             if inquiry["version"] != normalized["expected_version"] or visit["version"] != normalized["expected_visit_versions"][str(visit_id)]:
                 raise OwnerCommandError("VERSION_CONFLICT")
+            if inquiry["selected_service_id"] != visit["service_id"] or (
+                inquiry["agreed_duration_minutes"] is not None
+                and visit["duration_minutes"] is not None
+                and inquiry["agreed_duration_minutes"] != visit["duration_minutes"]
+            ):
+                raise OwnerCommandError("PLAN_CONFLICT")
             existing = connection.execute(text("SELECT id FROM visit_participations WHERE inquiry_id = :id AND closed_at IS NULL FOR UPDATE"), {"id": target_inquiry_id}).scalar_one_or_none()
             if existing is not None:
                 raise OwnerCommandError("PARTICIPATION_CONFLICT")

@@ -65,15 +65,17 @@ def _visit_payload(service_id: UUID, duration: int | None = 60) -> dict[str, obj
     return {"service_id": str(service_id), "start_at": "2026-10-01T08:00:00Z", "duration_minutes": duration}
 
 
-def _inquiry(database: Engine, status: str = "NEW") -> UUID:
-    service_id, option_id, contact_id, inquiry_id = (uuid4() for _ in range(4))
+def _inquiry(database: Engine, status: str = "NEW", *, service_id: UUID | None = None, duration: int | None = 60) -> UUID:
+    selected_service_id = service_id or uuid4()
+    option_id, contact_id, inquiry_id = (uuid4() for _ in range(3))
     with database.begin() as connection:
-        connection.execute(text("INSERT INTO services (id, code, title, description, information, active, sort_order) VALUES (:id, :code, 'Inquiry ride', 'Synthetic', 'Synthetic', true, 2)"), {"id": service_id, "code": f"inquiry-{service_id.hex}"})
-        connection.execute(text("INSERT INTO service_options (id, service_id, code, duration_minutes, pricing_mode, price_minor, currency, active) VALUES (:id, :service_id, :code, 60, 'FIXED_PER_PERSON', 100, 'RUB', true)"), {"id": option_id, "service_id": service_id, "code": f"option-{option_id.hex}"})
+        if service_id is None:
+            connection.execute(text("INSERT INTO services (id, code, title, description, information, active, sort_order) VALUES (:id, :code, 'Inquiry ride', 'Synthetic', 'Synthetic', true, 2)"), {"id": selected_service_id, "code": f"inquiry-{selected_service_id.hex}"})
+        connection.execute(text("INSERT INTO service_options (id, service_id, code, duration_minutes, pricing_mode, price_minor, currency, active) VALUES (:id, :service_id, :code, :duration, 'FIXED_PER_PERSON', 100, 'RUB', true)"), {"id": option_id, "service_id": selected_service_id, "code": f"option-{option_id.hex}", "duration": duration})
         connection.execute(text("INSERT INTO contact_cards (id) VALUES (:id)"), {"id": contact_id})
         connection.execute(text("""INSERT INTO inquiries (id, contact_id, source_kind, status, contact_snapshot, selection_snapshot, requester_name, contact_kind, contact_value)
             VALUES (:id, :contact_id, 'PHONE', :status, '{}'::jsonb, '{}'::jsonb, 'Synthetic', 'PHONE', '+70000000000')"""), {"id": inquiry_id, "contact_id": contact_id, "status": status})
-        connection.execute(text("INSERT INTO inquiry_terms (inquiry_id, service_option_id, participants_count, currency) VALUES (:inquiry_id, :option_id, 1, 'RUB')"), {"inquiry_id": inquiry_id, "option_id": option_id})
+        connection.execute(text("INSERT INTO inquiry_terms (inquiry_id, service_option_id, participants_count, duration_minutes, currency) VALUES (:inquiry_id, :option_id, 1, :duration, 'RUB')"), {"inquiry_id": inquiry_id, "option_id": option_id, "duration": duration})
     return inquiry_id
 
 
@@ -97,7 +99,7 @@ def test_create_planned_visit_is_idempotent_and_audited(seeded: tuple[OwnerComma
 @pytest.mark.parametrize("status", ["NEW", "NEGOTIATING"])
 def test_confirm_accepts_eligible_inquiry_without_payment(seeded: tuple[OwnerCommandService, UUID, UUID], database: Engine, status: str):
     service, _, service_id = seeded
-    inquiry_id = _inquiry(database, status)
+    inquiry_id = _inquiry(database, status, service_id=service_id)
     visit = service.create_planned_visit(_visit_payload(service_id), f"visit-{status}")
     result = service.confirm_inquiry(inquiry_id, _confirm(visit.visit_id), f"confirm-{status}")
     replay = service.confirm_inquiry(inquiry_id, _confirm(visit.visit_id), f"confirm-{status}")
@@ -113,7 +115,7 @@ def test_confirm_accepts_eligible_inquiry_without_payment(seeded: tuple[OwnerCom
 
 def test_confirmation_rejection_is_atomic_and_key_is_not_consumed(seeded: tuple[OwnerCommandService, UUID, UUID], database: Engine):
     service, _, service_id = seeded
-    inquiry_id = _inquiry(database)
+    inquiry_id = _inquiry(database, service_id=service_id)
     visit = service.create_planned_visit(_visit_payload(service_id), "create")
     with pytest.raises(OwnerCommandError, match="VERSION_CONFLICT"):
         service.confirm_inquiry(inquiry_id, _confirm(visit.visit_id, visit_version=7), "bad-version")
@@ -127,7 +129,7 @@ def test_confirmation_rejection_is_atomic_and_key_is_not_consumed(seeded: tuple[
 
 def test_confirmation_requires_exact_target_version_and_never_replaces_participation(seeded: tuple[OwnerCommandService, UUID, UUID], database: Engine):
     service, _, service_id = seeded
-    inquiry_id = _inquiry(database)
+    inquiry_id = _inquiry(database, service_id=service_id)
     first, second = service.create_planned_visit(_visit_payload(service_id), "one"), service.create_planned_visit(_visit_payload(service_id), "two")
     missing_version_payloads = [
         {"expected_visit_versions": {str(first.visit_id): 1}, "payload": {"visit_id": str(first.visit_id)}},
@@ -157,3 +159,37 @@ def test_invalid_service_and_reused_key_with_changed_payload_are_safe(seeded: tu
         assert connection.execute(text("SELECT count(*) FROM visits")).scalar_one() == 1
         assert connection.execute(text("SELECT count(*) FROM operation_receipts")).scalar_one() == 1
     assert created.visit_id
+
+
+def test_confirmation_rejects_incompatible_service_or_duration_without_mutation(seeded: tuple[OwnerCommandService, UUID, UUID], database: Engine):
+    service, _, service_id = seeded
+    visit = service.create_planned_visit(_visit_payload(service_id), "compatible-plan")
+    incompatible_service = _inquiry(database)
+    incompatible_duration = _inquiry(database, service_id=service_id, duration=30)
+    for inquiry_id, key in ((incompatible_service, "wrong-service"), (incompatible_duration, "wrong-duration")):
+        with pytest.raises(OwnerCommandError, match="PLAN_CONFLICT"):
+            service.confirm_inquiry(inquiry_id, _confirm(visit.visit_id), key)
+    with database.connect() as connection:
+        assert connection.execute(text("SELECT count(*) FROM visit_participations")).scalar_one() == 0
+        assert connection.execute(text("SELECT status, version FROM inquiries WHERE id=:id"), {"id": incompatible_service}).one() == ("NEW", 1)
+        assert connection.execute(text("SELECT status, version FROM inquiries WHERE id=:id"), {"id": incompatible_duration}).one() == ("NEW", 1)
+        assert connection.execute(text("SELECT version FROM visits WHERE id=:id"), {"id": visit.visit_id}).scalar_one() == 1
+
+
+def test_confirmation_allows_an_explicitly_unknown_duration(seeded: tuple[OwnerCommandService, UUID, UUID], database: Engine):
+    service, _, service_id = seeded
+    inquiry_id = _inquiry(database, service_id=service_id, duration=None)
+    visit = service.create_planned_visit(_visit_payload(service_id, 60), "known-plan")
+    result = service.confirm_inquiry(inquiry_id, _confirm(visit.visit_id), "unknown-duration")
+    assert (result.inquiry_version, result.visit_version) == (2, 2)
+
+
+def test_inactive_service_cannot_create_a_plan(seeded: tuple[OwnerCommandService, UUID, UUID], database: Engine):
+    service, _, service_id = seeded
+    with database.begin() as connection:
+        connection.execute(text("UPDATE services SET active=false WHERE id=:id"), {"id": service_id})
+    with pytest.raises(OwnerCommandError, match="OPTION_UNAVAILABLE"):
+        service.create_planned_visit(_visit_payload(service_id), "inactive")
+    with database.connect() as connection:
+        assert connection.execute(text("SELECT count(*) FROM visits")).scalar_one() == 0
+        assert connection.execute(text("SELECT count(*) FROM operation_receipts")).scalar_one() == 0
