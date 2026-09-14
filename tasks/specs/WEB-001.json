@@ -1,0 +1,43 @@
+{
+  "id": "WEB-001",
+  "title": "Build the public landing page and inquiry form",
+  "type": "implementation",
+  "status": "BACKLOG",
+  "priority": "high",
+  "executor": {"preferred": "cloud", "fallback": "cloud"},
+  "reviewer": "cloud",
+  "depends_on": ["PUBLIC-001", "PUBLIC-002"],
+  "allowed_paths": ["apps/web/**", "tests/web001/**", "tasks/specs/WEB-001.json"],
+  "forbidden_paths": [
+    ".env", ".env.*", "apps/api/**", "alembic/**", "docs/**", "scripts/**", "pyproject.toml",
+    "package.json", "package-lock.json", "node_modules/**", "apps/bots/**", "packages/**"
+  ],
+  "context": [
+    "AGENTS.md", "docs/development-pipeline.md", "docs/requirements.md", "docs/api.md",
+    "apps/web/.gitkeep", "tests/api/test_public_catalog_routes.py", "tests/api/test_public_submission_routes.py"
+  ],
+  "requirements": [
+    "Create a dependency-free responsive Russian static landing under apps/web with index.html, stylesheet and browser JavaScript. It is a client interface only: do not introduce a bundler, server, hosting, runtime configuration or new package dependency.",
+    "Load the public catalog from GET /api/v1/public/catalog and render only returned active services/options, their duration and price. Fixed prices use RUB formatting; negotiated options show «По договорённости». Do not hardcode a duplicate commercial price list or invent an address, phone number, map URL, photos, age threshold or participation guarantee.",
+    "Present the accepted customer information in clear Russian: instruction before mounting, clothing/visit rules supplied by the catalog, beginner-friendly formats, children’s options, trainer approval for an active gallop ride, and the approximately 110 kg weight notice as a discussion point rather than an automatic gate. Show the catalog location link only when supplied by the API.",
+    "Implement an accessible inquiry form with service option, name, contact kind/value, participant count, desired date/time, experience and optional comment. It must request a submission token then submit to POST /api/v1/public/inquiries with Idempotency-Key, retain the same token/key during a retryable network outcome, preserve UTM labels from the landing URL, and distinguish accepted receipt from an unconfirmed booking.",
+    "Render loading, unavailable, validation and retryable error states without exposing server diagnostics or claiming payment/booking confirmation. Unknown API data must be escaped before it enters the DOM. The page must work without tracking scripts, analytics SDKs, external fonts or external images.",
+    "Add focused offline structural tests for the public contract: no hardcoded commercial catalog, expected endpoints/form fields and the required non-gate informational wording. Do not call a real server, use credentials, deploy or alter backend code."
+  ],
+  "acceptance": [
+    "A visitor can understand the service conditions, read the live catalog, choose an option and submit a prepared request without being promised a confirmed slot or automated eligibility decision.",
+    "The form uses the accepted public token/idempotency protocol and retains the data required for a safe retry.",
+    "Focused offline tests, scope and whitespace checks pass with no external network calls."
+  ],
+  "validation": [
+    {"name": "WEB-001 contract tests", "argv": ["{python}", "-m", "unittest", "discover", "-s", "tests/web001", "-v"], "timeout": 60},
+    {"name": "whitespace", "argv": ["git", "diff", "--check"], "timeout": 10}
+  ],
+  "risk": "medium",
+  "retry_limit": 0,
+  "shared_paths_approval": {
+    "paths": ["apps/web/**", "tests/web001/**", "tasks/specs/WEB-001.json"],
+    "reviewer": "cloud:codex",
+    "reason": "Accepted public information funnel using the existing catalog and submission contracts without a hosting or backend change."
+  }
+}

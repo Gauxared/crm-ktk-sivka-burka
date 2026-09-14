@@ -1,0 +1,51 @@
+{
+  "id": "ADMIN-001",
+  "title": "Expose owner-only inquiry list and detail read model",
+  "type": "implementation",
+  "status": "BACKLOG",
+  "priority": "high",
+  "executor": {"preferred": "cloud", "fallback": "cloud"},
+  "reviewer": "cloud",
+  "depends_on": ["APP-001", "AUTH-003", "DB-005", "DB-006", "DB-007"],
+  "allowed_paths": [
+    "apps/api/sivka_burka_api/admin_inquiries.py",
+    "apps/api/sivka_burka_api/main.py",
+    "tests/admin_inquiries/**",
+    "tasks/specs/ADMIN-001.json"
+  ],
+  "forbidden_paths": [
+    ".env", ".env.*", "alembic/**", "apps/api/sivka_burka_api/admin_sessions.py",
+    "apps/api/sivka_burka_api/inquiries.py", "apps/api/sivka_burka_api/public_submission.py",
+    "apps/api/sivka_burka_api/public_catalog.py", "apps/web/**", "docs/**", "scripts/**",
+    "pyproject.toml", "apps/bots/**", "packages/**"
+  ],
+  "context": [
+    "AGENTS.md", "docs/development-pipeline.md", "docs/api.md", "docs/database.md",
+    "apps/api/sivka_burka_api/main.py", "apps/api/sivka_burka_api/admin_sessions.py",
+    "tests/integration/test_app001_inquiry_command.py"
+  ],
+  "requirements": [
+    "Add an explicitly injected owner-only read runtime and GET /api/v1/admin/inquiries plus GET /api/v1/admin/inquiries/{id}. Both endpoints require a valid existing owner session and return 401 AUTH_REQUIRED without revealing private data when it is absent or invalid. They are read-only and do not require CSRF.",
+    "The list supports status, has_visit and channel filters, stable received_at/id ordering, opaque cursor bound to the active filters, and limit with default 50 and range 1..100. Its InquirySummary contains the fields accepted in docs/api.md section 6, including a calculated cash summary; no contact details or comments are returned in the list.",
+    "Inquiry detail returns the accepted owner-only information: contact snapshot and current contact, service selection snapshot, agreed terms, client request, current participation when present, manual cash notes with correction state, calculated cash summary, safe notification summary and allowed_commands as an empty list until command handlers are implemented. Unknown or inaccessible IDs return 404 without a database error body.",
+    "Read each list page and detail through a PostgreSQL READ ONLY REPEATABLE READ transaction so joins cannot combine different moments. CashSummary derives only from currently effective cash notes and reports DATA_REVIEW_REQUIRED for a return larger than receipts; it stores no new aggregate.",
+    "Add synthetic PostgreSQL integration tests for session protection, list filter/cursor behaviour, private-vs-summary field boundary, detail values, effective correction calculation, notification summary and 404. Tests create isolated random databases and never read a local .env or use a configured source database.",
+    "Do not add writes, status commands, visit calendar routes, payment integrations, catalog editing, production runtime composition, secrets or frontend assets."
+  ],
+  "acceptance": [
+    "A signed-in owner can browse incoming inquiries and open one full CRM card, while visitors cannot obtain any CRM data.",
+    "The returned cash, correction and notification information is a consistent read model of persisted facts and does not change inquiry or visit state.",
+    "Focused isolated PostgreSQL tests, scope and whitespace checks pass."
+  ],
+  "validation": [
+    {"name": "ADMIN-001 tests", "argv": ["{python}", "-m", "pytest", "tests/admin_inquiries", "-q"], "timeout": 180},
+    {"name": "whitespace", "argv": ["git", "diff", "--check"], "timeout": 10}
+  ],
+  "risk": "high",
+  "retry_limit": 0,
+  "shared_paths_approval": {
+    "paths": ["apps/api/sivka_burka_api/main.py", "apps/api/sivka_burka_api/admin_inquiries.py", "tests/admin_inquiries/**", "tasks/specs/ADMIN-001.json"],
+    "reviewer": "cloud:codex",
+    "reason": "Accepted owner CRM read boundary; it exposes only an authenticated consistent projection of existing inquiry, cash and outbox facts."
+  }
+}
