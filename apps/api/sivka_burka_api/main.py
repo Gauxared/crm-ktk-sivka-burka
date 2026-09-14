@@ -19,8 +19,10 @@ from .inquiries import (
 from .public_submission import PublicSubmissionRuntime, SubmissionRateLimitError
 from .public_catalog import PublicCatalogRuntime, PublicCatalogUnavailable
 from .admin_sessions import AdminSessionRuntime, COOKIE_NAME, LoginRateLimited
+from .admin_commands import AdminCommandRuntime
 from .admin_inquiries import AdminInquiryReadRuntime, AdminInquiryReader, InvalidInquiryCursor
 from .admin_visits import AdminVisitReadRuntime, AdminVisitReader, InvalidVisitCursor
+from .owner_commands import IdempotencyMismatch as OwnerIdempotencyMismatch, OwnerCommandError
 from .settings import load_settings
 
 
@@ -84,7 +86,7 @@ def _map_command_error(error: InquiryCommandError) -> JSONResponse:
     return _error("INVALID_REQUEST", 400)
 
 
-def create_app(*, public_submission_runtime: PublicSubmissionRuntime | None = None, public_catalog_runtime: PublicCatalogRuntime | None = None, admin_session_runtime: AdminSessionRuntime | None = None, admin_inquiry_read_runtime: AdminInquiryReadRuntime | None = None, admin_visit_read_runtime: AdminVisitReadRuntime | None = None) -> FastAPI:
+def create_app(*, public_submission_runtime: PublicSubmissionRuntime | None = None, public_catalog_runtime: PublicCatalogRuntime | None = None, admin_session_runtime: AdminSessionRuntime | None = None, admin_command_runtime: AdminCommandRuntime | None = None, admin_inquiry_read_runtime: AdminInquiryReadRuntime | None = None, admin_visit_read_runtime: AdminVisitReadRuntime | None = None) -> FastAPI:
     settings = load_settings()
     app = FastAPI(title="Sivka-Burka API", version="0.1.0")
 
@@ -153,6 +155,39 @@ def create_app(*, public_submission_runtime: PublicSubmissionRuntime | None = No
 
     def private_unauthorized() -> JSONResponse:
         return _error("AUTH_REQUIRED", 401)
+
+    def owner_command_runtime(request: Request) -> tuple[AdminCommandRuntime, UUID, dict[str, object]] | JSONResponse:
+        session_runtime = admin_runtime()
+        if isinstance(session_runtime, JSONResponse):
+            return session_runtime
+        token = request.cookies.get(COOKIE_NAME)
+        try:
+            session = session_runtime.active_session(token) if token else None
+        except Exception:
+            return private_unauthorized()
+        if session is None:
+            return private_unauthorized()
+        if not trusted_origin(request, session_runtime):
+            return _error("FORBIDDEN", 403)
+        csrf_token = request.headers.get("X-CSRF-Token")
+        try:
+            csrf_valid = hmac.compare_digest(session["csrf_secret"], csrf_token.encode("ascii"))
+        except (AttributeError, UnicodeEncodeError):
+            csrf_valid = False
+        if not csrf_valid:
+            return _error("CSRF_FAILED", 403)
+        if admin_command_runtime is None:
+            return _error("ADMIN_COMMANDS_UNAVAILABLE", 503)
+        return admin_command_runtime, UUID(str(session["owner_id"])), session
+
+    def map_owner_command_error(error: OwnerCommandError) -> JSONResponse:
+        if isinstance(error, OwnerIdempotencyMismatch) or error.code == "IDEMPOTENCY_MISMATCH":
+            return _error("IDEMPOTENCY_MISMATCH", 409)
+        if error.code == "RESULT_EXPIRED":
+            return _error("RESULT_EXPIRED", 410)
+        if error.code == "OPTION_UNAVAILABLE":
+            return _error("OPTION_UNAVAILABLE", 422)
+        return _error("VALIDATION_ERROR", 422)
 
     def owner_read_runtime(request: Request) -> AdminInquiryReader | JSONResponse:
         session_runtime = admin_runtime()
@@ -258,6 +293,31 @@ def create_app(*, public_submission_runtime: PublicSubmissionRuntime | None = No
         if result is None:
             return _error("NOT_FOUND", 404)
         return JSONResponse({"data": result}, headers=_NO_STORE)
+
+    @app.post("/api/v1/admin/visits", tags=["admin"])
+    async def create_admin_visit(request: Request) -> JSONResponse:
+        runtime = owner_command_runtime(request)
+        if isinstance(runtime, JSONResponse):
+            return runtime
+        if request.headers.get("content-type", "").split(";", 1)[0].strip().lower() != "application/json":
+            return _error("UNSUPPORTED_MEDIA_TYPE", 415)
+        try:
+            payload = await _json_object(request)
+        except InquiryCommandError:
+            return _error("VALIDATION_ERROR", 422)
+        if set(payload) != {"service_id", "start_at", "duration_minutes"}:
+            return _error("VALIDATION_ERROR", 422)
+        idempotency_key = request.headers.get("Idempotency-Key")
+        if not idempotency_key:
+            return _error("VALIDATION_ERROR", 422)
+        command_runtime, owner_id, _session = runtime
+        try:
+            result = command_runtime.owner_commands(owner_id).create_planned_visit(payload, idempotency_key)
+        except OwnerCommandError as error:
+            return map_owner_command_error(error)
+        data = {"command_id": str(result.command_id), "visit": {"id": str(result.visit_id), "version": result.version, "status": result.status}}
+        headers = {**_NO_STORE, **({"Idempotent-Replay": "true"} if result.replay else {})}
+        return JSONResponse({"data": data}, status_code=200 if result.replay else 201, headers=headers)
 
     @app.post("/api/v1/admin/session", tags=["admin"])
     async def admin_login(request: Request) -> JSONResponse:
