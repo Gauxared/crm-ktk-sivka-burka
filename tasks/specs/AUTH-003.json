@@ -1,0 +1,32 @@
+{
+  "id": "AUTH-003",
+  "title": "Provide controlled one-time owner provisioning CLI",
+  "type": "implementation",
+  "status": "BACKLOG",
+  "priority": "high",
+  "executor": {"preferred": "cloud", "fallback": "cloud"},
+  "reviewer": "cloud",
+  "depends_on": ["AUTH-002"],
+  "allowed_paths": ["apps/api/sivka_burka_api/provision_owner.py", "tests/provisioning/**", "tasks/specs/AUTH-003.json"],
+  "forbidden_paths": [".env", ".env.*", "apps/api/sivka_burka_api/main.py", "apps/api/sivka_burka_api/admin_sessions.py", "alembic/**", "scripts/**", "docs/**", "pyproject.toml", "apps/web/**", "apps/bots/**"],
+  "context": ["AGENTS.md", "docs/development-pipeline.md", "docs/api.md", "docs/database.md", "apps/api/sivka_burka_api/admin_sessions.py", "apps/api/sivka_burka_api/settings.py", "tests/db006/test_owner_accounts_sessions.py"],
+  "requirements": [
+    "Implement a Python module CLI for a controlled deployment-time creation of exactly one initial owner account, not an HTTP endpoint. It takes a non-empty login argument, reads the password twice through getpass without echoing or logging it, requires an explicit confirmation flag, and obtains DATABASE_URL only from the process environment.",
+    "Use the accepted versioned scrypt hashing helper, create a UUID owner with credentials_version=1, and persist no plaintext password, session token or recovery secret.",
+    "Take a PostgreSQL table lock inside a transaction, refuse when any owner account already exists, and make no partial write on mismatch, missing configuration, invalid input or concurrent second provisioning attempt. Reset, recovery, additional users and disabling accounts are out of scope.",
+    "Add synthetic unit and disposable-PostgreSQL integration tests. Tests must use generated passwords/URLs only, assert the stored value is a verifiable hash rather than plaintext, and never access a local .env or a configured source database.",
+    "Do not invoke the CLI against a real database, set real credentials, compose runtime HTTP dependencies, alter session routes or add a public administrative endpoint."
+  ],
+  "acceptance": [
+    "The command can create the first synthetic owner once with an echoed-off confirmed password and returns a non-secret receipt.",
+    "A second invocation, password mismatch, absent DB URL, absent confirmation or empty login leaves owner_accounts unchanged and does not reveal a password.",
+    "Focused unit/integration tests, scope and whitespace checks pass."
+  ],
+  "validation": [
+    {"name": "provisioning tests", "argv": ["{python}", "-m", "pytest", "tests/provisioning", "-q"], "timeout": 180},
+    {"name": "whitespace", "argv": ["git", "diff", "--check"], "timeout": 10}
+  ],
+  "risk": "high",
+  "retry_limit": 0,
+  "shared_paths_approval": {"paths": ["apps/api/sivka_burka_api/provision_owner.py", "tests/provisioning/**", "tasks/specs/AUTH-003.json"], "reviewer": "cloud:codex", "reason": "Accepted controlled deployment operation needed to provision the single owner without exposing a public registration or handling real credentials in this task."}
+}

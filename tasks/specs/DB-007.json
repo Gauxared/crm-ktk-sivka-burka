@@ -1,0 +1,32 @@
+{
+  "id": "DB-007",
+  "title": "Persist manual cash notes and immutable corrections",
+  "type": "implementation",
+  "status": "BACKLOG",
+  "priority": "high",
+  "executor": {"preferred": "cloud", "fallback": "cloud"},
+  "reviewer": "cloud",
+  "depends_on": ["DB-005", "DB-006", "ARCH-004", "ARCH-006"],
+  "allowed_paths": ["alembic/**", "tests/db007/**", "tasks/specs/DB-007.json"],
+  "forbidden_paths": [".env", ".env.*", "apps/**", "tests/api/**", "tests/integration/**", "docs/**", "packages/**"],
+  "context": ["AGENTS.md", "docs/development-pipeline.md", "docs/database.md", "docs/api.md", "alembic/versions/20260913_06_owner_accounts_sessions.py", "tests/db006/test_owner_accounts_sessions.py"],
+  "requirements": [
+    "Add the next Alembic revision for cash_notes and cash_note_corrections exactly as accepted in docs/database.md, using UUID primary keys and restrictive foreign keys to inquiries and owner_accounts.",
+    "A cash note records only a positive RUB amount, kind RECEIPT or REFUND_NOTE, occurred_at, recorded_at, owner_id and note. Preserve original notes; no mutable balance, checkout, payment-provider data or automatic refund behavior is introduced.",
+    "Add the composite identity needed to prevent a correction from referencing a note of another inquiry. A correction keeps original note, optional replacement note, reason, recorded_at and owner; original and replacement links are individually unique and cannot refer to the same note.",
+    "Add isolated PostgreSQL migration tests under tests/db007 that create a unique disposable database, migrate Alembic head, assert positive amount/currency/kind, cross-inquiry rejection, unique correction links and immutable correction structure, then drop the database in finally. Never mutate the configured source DATABASE_URL.",
+    "Do not add HTTP routes, cash-summary queries, owner commands, payment integrations, production configuration or secrets."
+  ],
+  "acceptance": [
+    "A clean PostgreSQL database reaches DB-007 head with append-only cash facts and correction linkage needed for the accepted CashSummary model.",
+    "The database rejects invalid money facts, a cross-inquiry correction, duplicate original/replacement correction links and self-replacement.",
+    "Focused PostgreSQL tests, scope and whitespace checks pass without contacting a payment service."
+  ],
+  "validation": [
+    {"name": "DB-007 PostgreSQL tests", "argv": ["{python}", "-m", "pytest", "tests/db007", "-q"], "timeout": 180},
+    {"name": "whitespace", "argv": ["git", "diff", "--check"], "timeout": 10}
+  ],
+  "risk": "high",
+  "retry_limit": 0,
+  "shared_paths_approval": {"paths": ["alembic/**", "tests/db007/**", "tasks/specs/DB-007.json"], "reviewer": "cloud:codex", "reason": "Accepted database prerequisite for manual payment facts and CRM summaries; the scope deliberately excludes any payment execution or application command."}
+}
