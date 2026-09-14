@@ -3,6 +3,7 @@
 import hmac
 import json
 from datetime import datetime, timezone
+from uuid import UUID
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
@@ -18,6 +19,7 @@ from .inquiries import (
 from .public_submission import PublicSubmissionRuntime, SubmissionRateLimitError
 from .public_catalog import PublicCatalogRuntime, PublicCatalogUnavailable
 from .admin_sessions import AdminSessionRuntime, COOKIE_NAME, LoginRateLimited
+from .admin_inquiries import AdminInquiryReadRuntime, AdminInquiryReader, InvalidInquiryCursor
 from .settings import load_settings
 
 
@@ -81,7 +83,7 @@ def _map_command_error(error: InquiryCommandError) -> JSONResponse:
     return _error("INVALID_REQUEST", 400)
 
 
-def create_app(*, public_submission_runtime: PublicSubmissionRuntime | None = None, public_catalog_runtime: PublicCatalogRuntime | None = None, admin_session_runtime: AdminSessionRuntime | None = None) -> FastAPI:
+def create_app(*, public_submission_runtime: PublicSubmissionRuntime | None = None, public_catalog_runtime: PublicCatalogRuntime | None = None, admin_session_runtime: AdminSessionRuntime | None = None, admin_inquiry_read_runtime: AdminInquiryReadRuntime | None = None) -> FastAPI:
     settings = load_settings()
     app = FastAPI(title="Sivka-Burka API", version="0.1.0")
 
@@ -150,6 +152,43 @@ def create_app(*, public_submission_runtime: PublicSubmissionRuntime | None = No
 
     def private_unauthorized() -> JSONResponse:
         return _error("AUTH_REQUIRED", 401)
+
+    def owner_read_runtime(request: Request) -> AdminInquiryReader | JSONResponse:
+        session_runtime = admin_runtime()
+        if isinstance(session_runtime, JSONResponse):
+            return session_runtime
+        token = request.cookies.get(COOKIE_NAME)
+        if not token or session_runtime.active_session(token) is None:
+            return private_unauthorized()
+        if admin_inquiry_read_runtime is None:
+            return _error("ADMIN_INQUIRIES_UNAVAILABLE", 503)
+        return AdminInquiryReader(admin_inquiry_read_runtime)
+
+    @app.get("/api/v1/admin/inquiries", tags=["admin"])
+    def list_admin_inquiries(request: Request, status: str | None = None, has_visit: bool | None = None, channel: str | None = None, cursor: str | None = None, limit: int = 50) -> JSONResponse:
+        runtime = owner_read_runtime(request)
+        if isinstance(runtime, JSONResponse):
+            return runtime
+        if not 1 <= limit <= 100:
+            return _error("INVALID_REQUEST", 400)
+        try:
+            result = runtime.list(status=status, has_visit=has_visit, channel=channel, cursor=cursor, limit=limit)
+        except InvalidInquiryCursor:
+            return _error("INVALID_REQUEST", 400)
+        return JSONResponse({"data": result}, headers=_NO_STORE)
+
+    @app.get("/api/v1/admin/inquiries/{inquiry_id}", tags=["admin"])
+    def read_admin_inquiry(inquiry_id: str, request: Request) -> JSONResponse:
+        runtime = owner_read_runtime(request)
+        if isinstance(runtime, JSONResponse):
+            return runtime
+        try:
+            result = runtime.detail(UUID(inquiry_id))
+        except ValueError:
+            return _error("NOT_FOUND", 404)
+        if result is None:
+            return _error("NOT_FOUND", 404)
+        return JSONResponse({"data": result}, headers=_NO_STORE)
 
     @app.post("/api/v1/admin/session", tags=["admin"])
     async def admin_login(request: Request) -> JSONResponse:
