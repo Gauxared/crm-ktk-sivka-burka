@@ -58,6 +58,7 @@ def database(monkeypatch: pytest.MonkeyPatch) -> Engine:
 def seeded(database: Engine) -> tuple[OwnerCommandService, UUID, UUID]:
     owner_id, service_id = uuid4(), uuid4()
     with database.begin() as connection:
+        connection.execute(text("INSERT INTO owner_accounts (id, login, password_hash, credentials_version) VALUES (:id, :login, :password_hash, 1)"), {"id": owner_id, "login": f"owner-{owner_id.hex}", "password_hash": b"synthetic"})
         connection.execute(text("INSERT INTO services (id, code, title, description, information, active, sort_order) VALUES (:id, 'ride', 'Ride', 'Synthetic', 'Synthetic', true, 1)"), {"id": service_id})
     return OwnerCommandService(database, owner_id, hmac_secret=b"synthetic-owner-secret", digest_key_version=3), owner_id, service_id
 
@@ -267,3 +268,106 @@ def test_inactive_service_cannot_create_a_plan(seeded: tuple[OwnerCommandService
     with database.connect() as connection:
         assert connection.execute(text("SELECT count(*) FROM visits")).scalar_one() == 0
         assert connection.execute(text("SELECT count(*) FROM operation_receipts")).scalar_one() == 0
+
+
+def _cash(expected_version: int = 1, *, expected_visit_versions: dict[str, int] | None = None, kind: str = "RECEIPT", amount_minor: int = 1750, occurred_at: str = "2026-10-02T09:30:00Z", note: str = "Cash recorded manually") -> dict[str, object]:
+    payload: dict[str, object] = {"expected_version": expected_version, "kind": kind, "amount_minor": amount_minor, "occurred_at": occurred_at, "note": note}
+    if expected_visit_versions is not None:
+        payload["expected_visit_versions"] = expected_visit_versions
+    return payload
+
+
+def test_cash_note_records_receipt_and_refund_without_status_prerequisite(seeded: tuple[OwnerCommandService, UUID, UUID], database: Engine):
+    service, owner_id, service_id = seeded
+    for index, status in enumerate(["NEW", "NEGOTIATING", "CONFIRMED", "COMPLETED", "CANCELLED"]):
+        inquiry_id = _inquiry(database, status, service_id=service_id)
+        result = service.record_cash_note(inquiry_id, _cash(kind="RECEIPT" if index % 2 == 0 else "REFUND_NOTE"), f"cash-{status}")
+        assert result.inquiry["status"] == status
+        assert result.inquiry["version"] == 2
+        assert result.changed_visits == ()
+        assert result.inquiry["cash_notes"][0]["currency"] == "RUB"
+    with database.connect() as connection:
+        rows = connection.execute(text("SELECT kind, currency, owner_id FROM cash_notes ORDER BY kind, id")).all()
+        assert len(rows) == 5
+        assert {row[0] for row in rows} == {"RECEIPT", "REFUND_NOTE"}
+        assert {row[1] for row in rows} == {"RUB"}
+        assert {row[2] for row in rows} == {owner_id}
+
+
+def test_cash_note_locks_active_visit_updates_versions_and_is_idempotent(seeded: tuple[OwnerCommandService, UUID, UUID], database: Engine):
+    service, owner_id, service_id = seeded
+    inquiry_id = _inquiry(database, service_id=service_id)
+    visit = service.create_planned_visit(_visit_payload(service_id), "cash-visit")
+    service.confirm_inquiry(inquiry_id, _confirm(visit.visit_id), "cash-confirm")
+    payload = _cash(2, expected_visit_versions={str(visit.visit_id): 2})
+    first = service.record_cash_note(inquiry_id, payload, "cash-replay")
+    first_response = first.response()
+    replay = service.record_cash_note(inquiry_id, payload, "cash-replay")
+    assert replay.replay is True
+    assert replay.response() == first_response
+    assert first.changed_visits == ({"id": str(visit.visit_id), "version": 3},)
+    with database.connect() as connection:
+        counts = connection.execute(text("""SELECT
+            (SELECT count(*) FROM cash_notes WHERE inquiry_id=:inquiry),
+            (SELECT count(*) FROM operation_receipts WHERE id=:command),
+            (SELECT count(*) FROM receipt_inquiries WHERE receipt_id=:command AND inquiry_id=:inquiry),
+            (SELECT count(*) FROM change_events WHERE command_id=:command),
+            (SELECT count(*) FROM event_inquiries ei JOIN change_events e ON e.id=ei.event_id WHERE e.command_id=:command),
+            (SELECT count(*) FROM event_visits ev JOIN change_events e ON e.id=ev.event_id WHERE e.command_id=:command),
+            (SELECT version FROM inquiries WHERE id=:inquiry),
+            (SELECT version FROM visits WHERE id=:visit)
+        """), {"inquiry": inquiry_id, "visit": visit.visit_id, "command": first.command_id}).one()
+    assert counts == (1, 1, 1, 1, 1, 1, 3, 3)
+    assert owner_id
+
+
+def test_cash_note_requires_exact_current_visit_versions_and_rejects_atomically(seeded: tuple[OwnerCommandService, UUID, UUID], database: Engine):
+    service, _, service_id = seeded
+    inquiry_id = _inquiry(database, service_id=service_id)
+    visit = service.create_planned_visit(_visit_payload(service_id), "cash-version-visit")
+    service.confirm_inquiry(inquiry_id, _confirm(visit.visit_id), "cash-version-confirm")
+    for payload in (_cash(2), _cash(2, expected_visit_versions={str(visit.visit_id): 1}), _cash(2, expected_visit_versions={str(uuid4()): 1})):
+        with pytest.raises(OwnerCommandError, match="EXPECTED_VERSION_REQUIRED|VERSION_CONFLICT"):
+            service.record_cash_note(inquiry_id, payload, f"cash-reject-{uuid4()}")
+    with pytest.raises(OwnerCommandError, match="VERSION_CONFLICT"):
+        service.record_cash_note(inquiry_id, _cash(1, expected_visit_versions={str(visit.visit_id): 2}), "cash-stale")
+    with database.connect() as connection:
+        assert connection.execute(text("SELECT count(*) FROM cash_notes WHERE inquiry_id=:id"), {"id": inquiry_id}).scalar_one() == 0
+        assert connection.execute(text("SELECT version FROM inquiries WHERE id=:id"), {"id": inquiry_id}).scalar_one() == 2
+        assert connection.execute(text("SELECT version FROM visits WHERE id=:id"), {"id": visit.visit_id}).scalar_one() == 2
+        assert connection.execute(text("SELECT count(*) FROM operation_receipts WHERE canonical_path LIKE :path"), {"path": f"/api/v1/admin/inquiries/{inquiry_id}/cash-notes"}).scalar_one() == 0
+
+
+def test_cash_note_validates_complete_utc_factual_body_and_does_not_consume_key(seeded: tuple[OwnerCommandService, UUID, UUID], database: Engine):
+    service, _, service_id = seeded
+    inquiry_id = _inquiry(database, service_id=service_id)
+    invalids = [
+        {}, {"kind": "RECEIPT", "amount_minor": 1, "occurred_at": "2026-10-02T00:00:00Z", "note": "x"},
+        _cash(kind="PAYMENT"), _cash(amount_minor=0), _cash(amount_minor=True),
+        _cash(occurred_at="2026-10-02T00:00:00"), _cash(occurred_at="2026-10-02T00:00:00+03:00"),
+        _cash(note=" "), {**_cash(), "currency": "USD"},
+    ]
+    for payload in invalids:
+        with pytest.raises(OwnerCommandError):
+            service.record_cash_note(inquiry_id, payload, "reusable-after-rejection")
+    accepted = service.record_cash_note(inquiry_id, _cash(), "reusable-after-rejection")
+    assert accepted.inquiry["version"] == 2
+
+
+def test_cash_note_receipt_replay_is_stable_and_expired_or_mismatched_never_reexecutes(seeded: tuple[OwnerCommandService, UUID, UUID], database: Engine):
+    service, _, service_id = seeded
+    inquiry_id = _inquiry(database, service_id=service_id)
+    first = service.record_cash_note(inquiry_id, _cash(), "cash-stable")
+    stored = first.response()
+    with database.begin() as connection:
+        connection.execute(text("UPDATE inquiries SET requester_name='Later' WHERE id=:id"), {"id": inquiry_id})
+        connection.execute(text("INSERT INTO cash_notes (id, inquiry_id, kind, amount_minor, currency, occurred_at, owner_id, note) VALUES (:id, :inquiry, 'RECEIPT', 11, 'RUB', now(), :owner, 'later')"), {"id": uuid4(), "inquiry": inquiry_id, "owner": service.owner_id})
+    assert service.record_cash_note(inquiry_id, _cash(), "cash-stable").response() == stored
+    with pytest.raises(OwnerCommandError, match="IDEMPOTENCY_MISMATCH"):
+        service.record_cash_note(inquiry_id, _cash(amount_minor=42), "cash-stable")
+    with database.begin() as connection:
+        connection.execute(text("UPDATE operation_receipts SET result_json=NULL, tombstoned_at=now() WHERE id=:id"), {"id": first.command_id})
+    with pytest.raises(OwnerCommandError, match="RESULT_EXPIRED"):
+        service.record_cash_note(inquiry_id, _cash(), "cash-stable")
+    with database.connect() as connection:
+        assert connection.execute(text("SELECT count(*) FROM cash_notes WHERE inquiry_id=:id"), {"id": inquiry_id}).scalar_one() == 2
