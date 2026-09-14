@@ -1,0 +1,53 @@
+{
+  "id": "API-001",
+  "title": "Expose authenticated owner creation of planned visits",
+  "type": "implementation",
+  "status": "BACKLOG",
+  "priority": "high",
+  "executor": {"preferred": "cloud", "fallback": "cloud"},
+  "reviewer": "cloud",
+  "depends_on": ["AUTH-003", "CAL-001", "CMD-001"],
+  "allowed_paths": [
+    "apps/api/sivka_burka_api/admin_commands.py",
+    "apps/api/sivka_burka_api/main.py",
+    "tests/admin_commands/**",
+    "tasks/specs/API-001.json"
+  ],
+  "forbidden_paths": [
+    ".env", ".env.*", "alembic/**", "apps/api/sivka_burka_api/admin_sessions.py",
+    "apps/api/sivka_burka_api/owner_commands.py", "apps/api/sivka_burka_api/admin_inquiries.py",
+    "apps/api/sivka_burka_api/admin_visits.py", "apps/api/sivka_burka_api/inquiries.py",
+    "apps/api/sivka_burka_api/public_submission.py", "apps/api/sivka_burka_api/public_catalog.py",
+    "apps/web/**", "docs/**", "scripts/**", "pyproject.toml", "apps/bots/**", "packages/**"
+  ],
+  "context": [
+    "AGENTS.md", "docs/development-pipeline.md", "docs/api.md", "docs/database.md",
+    "apps/api/sivka_burka_api/main.py", "apps/api/sivka_burka_api/admin_sessions.py",
+    "apps/api/sivka_burka_api/owner_commands.py", "tests/integration/test_admin_session_api.py",
+    "tests/owner_commands/test_owner_commands_postgres.py"
+  ],
+  "requirements": [
+    "Add an explicitly injected AdminCommandRuntime containing only an Engine, a non-empty HMAC secret and a positive digest-key version. It adapts the existing OwnerCommandService; production composition, defaults and secrets remain absent.",
+    "Expose POST /api/v1/admin/visits for the already accepted create_planned_visit payload {service_id, start_at, duration_minutes}. It requires an existing valid owner session, exact trusted Origin, application/json content type, X-CSRF-Token matching that session and Idempotency-Key. Missing or invalid session returns 401 AUTH_REQUIRED without command execution; invalid origin returns 403 FORBIDDEN; bad/missing CSRF returns 403 CSRF_FAILED; non-JSON returns 415 UNSUPPORTED_MEDIA_TYPE.",
+    "Require a strict JSON object with no transport fields and delegate only the three accepted semantic fields to OwnerCommandService. On first success return 201 with {data:{command_id,visit:{id,version,status}}}; an identical accepted retry returns 200 with the same data and Idempotent-Replay: true. Do not create another visit, receipt or audit event on replay.",
+    "Map the existing safe command outcomes without exposing diagnostics: IDEMPOTENCY_MISMATCH to 409, RESULT_EXPIRED to 410, VALIDATION_ERROR or OPTION_UNAVAILABLE to 422, and other unsupported command input to 422 VALIDATION_ERROR. All responses use the existing no-store envelope. Rejections before acceptance do not consume the idempotency key.",
+    "Add focused route-contract tests plus isolated synthetic PostgreSQL integration coverage for authentication, trusted origin, CSRF, content type, strict body shape, first creation, replay, idempotency mismatch, inactive/unknown service and persistence/audit boundaries. Tests create random disposable databases and never read a local .env or use a configured source database.",
+    "Do not expose inquiry commands, manual inquiry entry, payment commands, catalog changes, a production runtime, frontend assets, bot adapters, migrations, external calls or secrets."
+  ],
+  "acceptance": [
+    "A signed-in owner can create an empty planned visit through HTTP and immediately see it in the authenticated calendar read model.",
+    "CSRF, origin, session, idempotency and domain validation remain enforced before any visit is persisted.",
+    "Focused isolated PostgreSQL tests, scope and whitespace checks pass."
+  ],
+  "validation": [
+    {"name": "API-001 tests", "argv": ["{python}", "-m", "pytest", "tests/admin_commands", "-q"], "timeout": 180},
+    {"name": "whitespace", "argv": ["git", "diff", "--check"], "timeout": 10}
+  ],
+  "risk": "high",
+  "retry_limit": 0,
+  "shared_paths_approval": {
+    "paths": ["apps/api/sivka_burka_api/admin_commands.py", "apps/api/sivka_burka_api/main.py", "tests/admin_commands/**", "tasks/specs/API-001.json"],
+    "reviewer": "cloud:codex",
+    "reason": "Accepted first owner write endpoint, strictly adapting the reviewed transactional visit-creation core behind the established session and CSRF boundary."
+  }
+}
