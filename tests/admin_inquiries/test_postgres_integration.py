@@ -69,11 +69,11 @@ class Lifetime:
         return timedelta(hours=1)
 
 
-def payload(token: str) -> dict[str, object]:
+def payload(token: str, service_option_id: UUID) -> dict[str, object]:
     return {
         "submission_token": token,
         "catalog_version": 1,
-        "service_option_id": "synthetic-ride",
+        "service_option_id": str(service_option_id),
         "requester": {"name": f"Synthetic {token}", "contact": {"kind": "PHONE", "value": "+70000000000"}},
         "participants_count": 2,
         "requested_time": {"date": "2026-10-01", "time_text": "after 14:00"},
@@ -83,13 +83,13 @@ def payload(token: str) -> dict[str, object]:
     }
 
 
-def seed_inquiry(engine: Engine, secret: bytes, token: str, *, received_at: datetime, status: str, channel: str) -> UUID:
+def seed_inquiry(engine: Engine, secret: bytes, service_option_id: UUID, token: str, *, received_at: datetime, status: str, channel: str) -> UUID:
     with engine.begin() as connection:
         connection.execute(
             text("INSERT INTO submission_tokens (token_digest, digest_key_version, issued_at, expires_at) VALUES (:digest, 1, now(), now() + interval '1 hour')"),
             {"digest": _digest(secret, token)},
         )
-    inquiry_id = PublicInquiryCommandService(engine, hmac_secret=secret).submit(payload(token), f"key-{token}").inquiry_id
+    inquiry_id = PublicInquiryCommandService(engine, hmac_secret=secret).submit(payload(token, service_option_id), f"key-{token}").inquiry_id
     with engine.begin() as connection:
         connection.execute(
             text("UPDATE inquiries SET received_at=:received_at, status=:status, source_kind=:channel WHERE id=:id"),
@@ -108,9 +108,9 @@ def seed_read_model(engine: Engine) -> tuple[UUID, UUID]:
         connection.execute(text("INSERT INTO service_options (id, service_id, code, duration_minutes, pricing_mode, price_minor, currency, active) VALUES (:id, :service_id, 'synthetic-ride', 60, 'FIXED_PER_PERSON', 500, 'RUB', true)"), {"id": option_id, "service_id": service_id})
         connection.execute(text("INSERT INTO owner_accounts (id, login, password_hash, credentials_version) VALUES (:id, 'owner', :password_hash, 1)"), {"id": owner_id, "password_hash": hash_password("correct horse")})
 
-    old = seed_inquiry(engine, secret, "old", received_at=datetime(2026, 1, 1, tzinfo=timezone.utc), status="NEW", channel="PHONE")
-    detail = seed_inquiry(engine, secret, "detail", received_at=datetime(2026, 1, 3, tzinfo=timezone.utc), status="NEW", channel="PHONE")
-    scheduled = seed_inquiry(engine, secret, "scheduled", received_at=datetime(2026, 1, 4, tzinfo=timezone.utc), status="NEGOTIATING", channel="TELEGRAM")
+    old = seed_inquiry(engine, secret, option_id, "old", received_at=datetime(2026, 1, 1, tzinfo=timezone.utc), status="NEW", channel="PHONE")
+    detail = seed_inquiry(engine, secret, option_id, "detail", received_at=datetime(2026, 1, 3, tzinfo=timezone.utc), status="NEW", channel="PHONE")
+    scheduled = seed_inquiry(engine, secret, option_id, "scheduled", received_at=datetime(2026, 1, 4, tzinfo=timezone.utc), status="NEGOTIATING", channel="TELEGRAM")
     original, replacement, refund, correction, visit, participation = (uuid4() for _ in range(6))
     with engine.begin() as connection:
         connection.execute(text("UPDATE inquiries SET contact_snapshot=CAST(:contact AS jsonb), selection_snapshot=CAST(:selection AS jsonb), acquisition=CAST(:acquisition AS jsonb), owner_note='private owner note' WHERE id=:id"), {"id": detail, "contact": json.dumps({"name": "Synthetic detail", "contact": {"kind": "PHONE", "value": "+70000000000"}}), "selection": json.dumps({"option_code": "synthetic-ride", "price_minor": 500}), "acquisition": json.dumps({"utm_source": "synthetic", "campaign": "detail"})})
