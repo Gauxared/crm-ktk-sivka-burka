@@ -189,6 +189,19 @@ def create_app(*, public_submission_runtime: PublicSubmissionRuntime | None = No
             return _error("OPTION_UNAVAILABLE", 422)
         return _error("VALIDATION_ERROR", 422)
 
+    def map_inquiry_confirmation_error(error: OwnerCommandError) -> JSONResponse:
+        if isinstance(error, OwnerIdempotencyMismatch) or error.code == "IDEMPOTENCY_MISMATCH":
+            return _error("IDEMPOTENCY_MISMATCH", 409)
+        if error.code == "NOT_FOUND":
+            return _error("NOT_FOUND", 404)
+        if error.code in {"VERSION_CONFLICT", "PLAN_CONFLICT", "PARTICIPATION_CONFLICT"}:
+            return _error(error.code, 409)
+        if error.code == "RESULT_EXPIRED":
+            return _error("RESULT_EXPIRED", 410)
+        if error.code in {"EXPECTED_VERSION_REQUIRED", "INVALID_TRANSITION", "VALIDATION_ERROR", "OPTION_UNAVAILABLE"}:
+            return _error(error.code, 422)
+        return _error("VALIDATION_ERROR", 422)
+
     def owner_read_runtime(request: Request) -> AdminInquiryReader | JSONResponse:
         session_runtime = admin_runtime()
         if isinstance(session_runtime, JSONResponse):
@@ -318,6 +331,41 @@ def create_app(*, public_submission_runtime: PublicSubmissionRuntime | None = No
         data = {"command_id": str(result.command_id), "visit": {"id": str(result.visit_id), "version": result.version, "status": result.status}}
         headers = {**_NO_STORE, **({"Idempotent-Replay": "true"} if result.replay else {})}
         return JSONResponse({"data": data}, status_code=200 if result.replay else 201, headers=headers)
+
+    @app.post("/api/v1/admin/inquiries/{inquiry_id}/commands", tags=["admin"])
+    async def confirm_admin_inquiry(inquiry_id: str, request: Request) -> JSONResponse:
+        runtime = owner_command_runtime(request)
+        if isinstance(runtime, JSONResponse):
+            return runtime
+        if request.headers.get("content-type", "").split(";", 1)[0].strip().lower() != "application/json":
+            return _error("UNSUPPORTED_MEDIA_TYPE", 415)
+        try:
+            envelope = await _json_object(request)
+        except InquiryCommandError:
+            return _error("VALIDATION_ERROR", 422)
+        if set(envelope) != {"type", "expected_version", "expected_visit_versions", "payload"} or envelope.get("type") != "CONFIRM":
+            return _error("VALIDATION_ERROR", 422)
+        idempotency_key = request.headers.get("Idempotency-Key")
+        if not idempotency_key:
+            return _error("VALIDATION_ERROR", 422)
+        try:
+            target_inquiry_id = UUID(inquiry_id)
+        except ValueError:
+            return _error("NOT_FOUND", 404)
+        command_runtime, owner_id, _session = runtime
+        payload = {
+            "expected_version": envelope["expected_version"],
+            "expected_visit_versions": envelope["expected_visit_versions"],
+            "payload": envelope["payload"],
+        }
+        try:
+            result = command_runtime.owner_commands(owner_id).confirm_inquiry(
+                target_inquiry_id, payload, idempotency_key
+            )
+        except OwnerCommandError as error:
+            return map_inquiry_confirmation_error(error)
+        headers = {**_NO_STORE, **({"Idempotent-Replay": "true"} if result.replay else {})}
+        return JSONResponse({"data": result.response()}, headers=headers)
 
     @app.post("/api/v1/admin/session", tags=["admin"])
     async def admin_login(request: Request) -> JSONResponse:
