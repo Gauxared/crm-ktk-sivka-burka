@@ -184,14 +184,18 @@ class PublicInquiryCommandService:
             if token["expires_at"] <= now:
                 raise SubmissionExpired()
 
+            try:
+                public_option_id = UUID(normalized["service_option_id"])
+            except ValueError:
+                raise OptionUnavailable() from None
             option = connection.execute(
                 text("""SELECT so.id, so.service_id, so.duration_minutes, so.pricing_mode, so.price_minor,
                               so.currency, so.code AS option_code, s.code AS service_code, s.title AS service_title,
                               s.description, s.information
                        FROM service_options so JOIN services s ON s.id = so.service_id
                        JOIN club_settings cs ON cs.id = 1
-                       WHERE so.code = :code AND so.active AND s.active"""),
-                {"code": normalized["service_option_id"]},
+                       WHERE so.id = :option_id AND so.active AND s.active"""),
+                {"option_id": public_option_id},
             ).mappings().first()
             if option is None:
                 raise OptionUnavailable()
