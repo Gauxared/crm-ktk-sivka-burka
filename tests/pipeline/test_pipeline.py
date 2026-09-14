@@ -189,6 +189,30 @@ class GitLifecycle(unittest.TestCase):
         self.assertIsNone(r['worktree'])
         self.assertFalse(path.exists())
 
+    def test_finish_stages_a_reviewed_rename(self):
+        original = self.root / 'apps/api/original.py'
+        original.parent.mkdir(parents=True)
+        original.write_text('value = 1\n')
+        git(self.root, 'add', 'apps/api/original.py')
+        git(self.root, 'commit', '-m', 'Tracked source for rename')
+        self.pipeline.get('POC-100')['task']['validation'] = [
+            {'name': 'compile renamed', 'argv': ['{python}', '-c',
+             "compile(open('apps/api/renamed.py').read(), 'renamed.py', 'exec')"]}
+        ]
+
+        self.pipeline.start('POC-100')
+        r = self.pipeline.get('POC-100')
+        worktree = Path(r['worktree'])
+        renamed = worktree / 'apps/api/renamed.py'
+        (worktree / 'apps/api/original.py').rename(renamed)
+
+        self.pipeline.validate('POC-100')
+        self.approve()
+        self.pipeline.finish('POC-100')
+
+        self.assertFalse(original.exists())
+        self.assertTrue((self.root / 'apps/api/renamed.py').exists())
+
     def test_drive_advances_safe_steps_but_requires_implementation_and_review(self):
         result = self.pipeline.drive('POC-100')
         r = self.pipeline.get('POC-100')
