@@ -154,9 +154,19 @@ def test_confirm_requires_owner_browser_boundary_and_strict_envelope(database: E
     bad_path = client.post("/api/v1/admin/inquiries/not-a-uuid/commands", headers=command_headers, json=payload)
     assert bad_path.status_code == 404 and bad_path.json() == {"error": {"code": "NOT_FOUND"}}
     with database.connect() as connection:
-        assert connection.execute(text("SELECT count(*) FROM operation_receipts WHERE canonical_path LIKE '/api/v1/admin/inquiries/%'")) .scalar_one() == 0
+        assert connection.execute(text("SELECT count(*) FROM operation_receipts WHERE canonical_path LIKE '/api/v1/admin/inquiries/%'")).scalar_one() == 0
         assert connection.execute(text("SELECT count(*) FROM visit_participations")).scalar_one() == 0
-    assert owner_id
+    service = OwnerCommandService(database, owner_id, hmac_secret=COMMAND_SECRET, digest_key_version=3)
+    visit_id = visit(service, service_id, "shape-reuse-visit")
+    reuse_headers = headers(csrf_token, "reusable-shape-key")
+    rejected_with_key = client.post(target, headers=reuse_headers, json={**envelope(visit_id), "type": "COMPLETE"})
+    assert rejected_with_key.status_code == 422 and rejected_with_key.json() == {"error": {"code": "VALIDATION_ERROR"}}
+    accepted_with_same_key = client.post(target, headers=reuse_headers, json=envelope(visit_id))
+    assert accepted_with_same_key.status_code == 200
+    assert "idempotent-replay" not in accepted_with_same_key.headers
+    with database.connect() as connection:
+        assert connection.execute(text("SELECT count(*) FROM operation_receipts WHERE canonical_path=:path"), {"path": target}).scalar_one() == 1
+        assert connection.execute(text("SELECT count(*) FROM visit_participations WHERE inquiry_id=:id"), {"id": inquiry_id}).scalar_one() == 1
 
 
 @pytest.mark.parametrize("status", ["NEW", "NEGOTIATING"])
@@ -217,6 +227,13 @@ def test_confirm_maps_versions_plan_and_missing_targets_without_mutation(databas
     incompatible = create_inquiry(database, other_service)
     plan = client.post(f"/api/v1/admin/inquiries/{incompatible}/commands", headers=headers(csrf_token, "plan-conflict"), json=envelope(visit_id))
     assert plan.status_code == 409 and plan.json() == {"error": {"code": "PLAN_CONFLICT"}}
+    incompatible_duration = create_inquiry(database, service_id, duration=30)
+    duration_plan = client.post(f"/api/v1/admin/inquiries/{incompatible_duration}/commands", headers=headers(csrf_token, "duration-conflict"), json=envelope(visit_id))
+    assert duration_plan.status_code == 409 and duration_plan.json() == {"error": {"code": "PLAN_CONFLICT"}}
+    with database.connect() as connection:
+        assert connection.execute(text("SELECT count(*) FROM visit_participations WHERE inquiry_id=:id"), {"id": incompatible_duration}).scalar_one() == 0
+        assert connection.execute(text("SELECT status, version FROM inquiries WHERE id=:id"), {"id": incompatible_duration}).one() == ("NEW", 1)
+        assert connection.execute(text("SELECT version FROM visits WHERE id=:id"), {"id": visit_id}).scalar_one() == 1
     cancelled = create_inquiry(database, service_id, status="CANCELLED")
     invalid_transition = client.post(f"/api/v1/admin/inquiries/{cancelled}/commands", headers=headers(csrf_token, "cancelled"), json=envelope(visit_id))
     assert invalid_transition.status_code == 422 and invalid_transition.json() == {"error": {"code": "INVALID_TRANSITION"}}
@@ -229,4 +246,4 @@ def test_confirm_maps_versions_plan_and_missing_targets_without_mutation(databas
         assert connection.execute(text("SELECT count(*) FROM visit_participations")).scalar_one() == 1
         assert connection.execute(text("SELECT status, version FROM inquiries WHERE id=:id"), {"id": inquiry_id}).one() == ("NEW", 1)
         assert connection.execute(text("SELECT version FROM visits WHERE id=:id"), {"id": visit_id}).scalar_one() == 1
-        assert connection.execute(text("SELECT count(*) FROM operation_receipts WHERE canonical_path LIKE '/api/v1/admin/inquiries/%'")) .scalar_one() == 0
+        assert connection.execute(text("SELECT count(*) FROM operation_receipts WHERE canonical_path LIKE '/api/v1/admin/inquiries/%'")).scalar_one() == 0
