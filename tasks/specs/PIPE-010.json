@@ -1,0 +1,33 @@
+{
+  "id": "PIPE-010",
+  "title": "Finish reviewed renames already committed in task worktrees",
+  "type": "implementation",
+  "status": "BACKLOG",
+  "priority": "high",
+  "executor": {"preferred": "cloud", "fallback": "cloud"},
+  "reviewer": "cloud",
+  "depends_on": ["PIPE-009"],
+  "allowed_paths": ["scripts/task.py", "tests/pipeline/test_pipeline.py", "tasks/specs/PIPE-010.json"],
+  "forbidden_paths": [".env", ".env.*", "apps/**", "alembic/**", "docs/**", "packages/**"],
+  "context": ["AGENTS.md", "docs/development-pipeline.md", "scripts/task.py", "scripts/policy.py", "tests/pipeline/test_pipeline.py"],
+  "requirements": [
+    "Repair Pipeline.finish after the same scope-validated snapshot so it can merge both uncommitted and already committed allowed-path renames. It must not call git add with a deleted pathspec, must retain the existing validation/review/base/current-snapshot checks, and must not stage an out-of-scope change.",
+    "Extend the pipeline regression coverage to commit a task-worktree rename before validation, then prove validation, review and finish merge it successfully. Preserve the existing uncommitted rename regression from PIPE-009 and all controller safeguards.",
+    "Do not change product code, task-state recovery data, environment handling, integrations or documentation."
+  ],
+  "acceptance": [
+    "A reviewed rename completes regardless of whether the executor committed it before validation, while the scope gate remains authoritative.",
+    "The full pipeline test suite and whitespace check pass."
+  ],
+  "validation": [
+    {"name": "pipeline tests", "argv": ["{python}", "-m", "pytest", "tests/pipeline", "-q"], "timeout": 90},
+    {"name": "whitespace", "argv": ["git", "diff", "--check"], "timeout": 10}
+  ],
+  "risk": "medium",
+  "retry_limit": 0,
+  "shared_paths_approval": {
+    "paths": ["scripts/task.py", "tests/pipeline/test_pipeline.py", "tasks/specs/PIPE-010.json"],
+    "reviewer": "cloud:codex",
+    "reason": "The first rename repair covered a working-tree rename but not an executor-committed rename, which still blocks an otherwise reviewed task from finishing."
+  }
+}
