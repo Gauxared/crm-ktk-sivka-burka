@@ -12,6 +12,8 @@ from uuid import UUID, uuid4
 
 from sqlalchemy import Engine, text
 
+from sivka_burka_api.admin_inquiries import INQUIRY_DETAIL_KEYS, inquiry_detail_in_transaction
+
 
 class OwnerCommandError(ValueError):
     """A safe, stable domain failure for a future owner HTTP adapter."""
@@ -38,11 +40,30 @@ class PlannedVisitCreated:
 @dataclass(frozen=True)
 class InquiryConfirmed:
     command_id: UUID
-    inquiry_id: UUID
-    inquiry_version: int
-    visit_id: UUID
-    visit_version: int
+    inquiry: Mapping[str, Any]
+    changed_visits: tuple[Mapping[str, Any], ...]
     replay: bool = False
+
+    def response(self) -> dict[str, Any]:
+        """The stable, JSON-ready owner response persisted in the receipt."""
+        return {"command_id": str(self.command_id), "inquiry": self.inquiry,
+                "changed_visits": [dict(visit) for visit in self.changed_visits]}
+
+    @property
+    def inquiry_id(self) -> UUID:
+        return UUID(str(self.inquiry["id"]))
+
+    @property
+    def inquiry_version(self) -> int:
+        return int(self.inquiry["version"])
+
+    @property
+    def visit_id(self) -> UUID:
+        return UUID(str(self.changed_visits[0]["id"]))
+
+    @property
+    def visit_version(self) -> int:
+        return int(self.changed_visits[0]["version"])
 
 
 def _required_text(value: Any, field: str, maximum: int = 500) -> str:
@@ -131,7 +152,7 @@ class OwnerCommandService:
             connection.execute(text("SELECT id FROM business_write_guard WHERE id = 1 FOR UPDATE"))
             replay = self._replay(connection, path, key_digest, payload_digest)
             if replay is not None:
-                return InquiryConfirmed(UUID(replay["command_id"]), UUID(replay["inquiry_id"]), int(replay["inquiry_version"]), UUID(replay["visit_id"]), int(replay["visit_version"]), True)
+                return self._confirmed_result(replay, replay=True)
             inquiry = connection.execute(text("""SELECT i.id, i.status, i.version,
                        so.service_id AS selected_service_id, t.duration_minutes AS agreed_duration_minutes
                        FROM inquiries i
@@ -160,15 +181,18 @@ class OwnerCommandService:
             command_id, event_id = uuid4(), uuid4()
             now = datetime.now(timezone.utc)
             inquiry_version, visit_version = int(inquiry["version"]) + 1, int(visit["version"]) + 1
-            result = {"command_id": str(command_id), "inquiry_id": str(target_inquiry_id), "inquiry_version": inquiry_version, "visit_id": str(visit_id), "visit_version": visit_version}
             connection.execute(text("INSERT INTO visit_participations (id, inquiry_id, visit_id, joined_at) VALUES (:id, :inquiry_id, :visit_id, :joined_at)"), {"id": uuid4(), "inquiry_id": target_inquiry_id, "visit_id": visit_id, "joined_at": now})
             connection.execute(text("UPDATE inquiries SET status = 'CONFIRMED', version = :version WHERE id = :id"), {"id": target_inquiry_id, "version": inquiry_version})
             connection.execute(text("UPDATE visits SET version = :version WHERE id = :id"), {"id": visit_id, "version": visit_version})
+            detail = inquiry_detail_in_transaction(connection, target_inquiry_id)
+            if detail is None:
+                raise OwnerCommandError("NOT_FOUND")
+            result = {"command_id": str(command_id), "inquiry": detail, "changed_visits": [{"id": str(visit_id), "version": visit_version}]}
             self._store_receipt(connection, command_id, path, key_digest, payload_digest, result, now)
             self._event(connection, event_id, command_id, "INQUIRY_CONFIRMED", {"before": {"inquiry_id": str(target_inquiry_id), "status": inquiry["status"], "version": inquiry["version"], "visit_id": str(visit_id), "visit_version": visit["version"]}, "after": {"inquiry_id": str(target_inquiry_id), "status": "CONFIRMED", "version": inquiry_version, "visit_id": str(visit_id), "visit_version": visit_version}})
             connection.execute(text("INSERT INTO event_inquiries (event_id, inquiry_id) VALUES (:event_id, :inquiry_id)"), {"event_id": event_id, "inquiry_id": target_inquiry_id})
             connection.execute(text("INSERT INTO event_visits (event_id, visit_id) VALUES (:event_id, :visit_id)"), {"event_id": event_id, "visit_id": visit_id})
-        return InquiryConfirmed(command_id, target_inquiry_id, inquiry_version, visit_id, visit_version)
+        return self._confirmed_result(result)
 
     def _digests(self, idempotency_key: str, payload: Mapping[str, Any]) -> tuple[bytes, bytes]:
         return _digest(self.hmac_secret, _required_text(idempotency_key, "Idempotency-Key")), _payload_digest(self.hmac_secret, payload)
@@ -183,9 +207,30 @@ class OwnerCommandService:
             raise IdempotencyMismatch()
         if row["tombstoned_at"] is not None or row["result_json"] is None:
             raise OwnerCommandError("RESULT_EXPIRED")
-        result = _json_value(row["result_json"])
-        result["command_id"] = str(row["id"])
-        return result
+        return _json_value(row["result_json"])
+
+    @staticmethod
+    def _confirmed_result(result: Mapping[str, Any], *, replay: bool = False) -> InquiryConfirmed:
+        try:
+            if set(result) != {"command_id", "inquiry", "changed_visits"}:
+                raise ValueError
+            command_id = UUID(str(result["command_id"]))
+            inquiry = result["inquiry"]
+            changed_visits = result["changed_visits"]
+            if not isinstance(inquiry, Mapping) or set(inquiry) != INQUIRY_DETAIL_KEYS:
+                raise ValueError
+            if not isinstance(changed_visits, list) or len(changed_visits) != 1:
+                raise ValueError
+            if not isinstance(changed_visits[0], Mapping) or set(changed_visits[0]) != {"id", "version"}:
+                raise ValueError
+            UUID(str(inquiry["id"])); int(inquiry["version"])
+            UUID(str(changed_visits[0]["id"])); version = int(changed_visits[0]["version"])
+            if version <= 0:
+                raise ValueError
+        except (KeyError, TypeError, ValueError) as exc:
+            raise OwnerCommandError("RESULT_EXPIRED") from exc
+        inquiry_copy = json.loads(json.dumps(inquiry, separators=(",", ":")))
+        return InquiryConfirmed(command_id, inquiry_copy, (dict(changed_visits[0]),), replay)
 
     def _store_receipt(self, connection: Any, command_id: UUID, path: str, key_digest: bytes, payload_digest: bytes, result: Mapping[str, Any], now: datetime) -> None:
         connection.execute(text("""INSERT INTO operation_receipts

@@ -23,6 +23,14 @@ class AdminInquiryReadRuntime:
     engine: Engine
 
 
+INQUIRY_DETAIL_KEYS = frozenset({
+    "id", "version", "status", "requester_name", "service_title", "participants_count",
+    "requested_time", "visit_id", "agreed_start_at", "received_at", "channel", "cash_summary",
+    "contact_snapshot", "current_contact", "selected_option_snapshot", "agreed_terms", "comment",
+    "owner_note", "acquisition", "participation", "cash_notes", "notification_summary", "allowed_commands",
+})
+
+
 def _cursor_encode(value: dict[str, Any]) -> str:
     return urlsafe_b64encode(json.dumps(value, separators=(",", ":"), sort_keys=True).encode()).rstrip(b"=").decode()
 
@@ -136,49 +144,59 @@ class AdminInquiryReader:
         return {"items": items, "next_cursor": next_cursor}
 
     def detail(self, inquiry_id: UUID) -> dict[str, Any] | None:
-        query = text("""
-            SELECT i.*, i.source_kind AS channel, s.title AS service_title, t.service_option_id, t.participants_count, t.duration_minutes, t.total_minor,
-                   t.expected_prepayment_minor, t.currency, t.note AS terms_note, p.id AS participation_id,
-                   p.visit_id, p.joined_at, v.status AS visit_status, v.start_at AS agreed_start_at
-            FROM inquiries i JOIN inquiry_terms t ON t.inquiry_id=i.id
-            JOIN service_options o ON o.id=t.service_option_id JOIN services s ON s.id=o.service_id
-            LEFT JOIN visit_participations p ON p.inquiry_id=i.id AND p.closed_at IS NULL
-            LEFT JOIN visits v ON v.id=p.visit_id WHERE i.id=:id
-        """)
         with self.engine.connect() as connection:
             transaction = connection.begin()
             try:
                 connection.execute(text("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY"))
-                row = connection.execute(query, {"id": inquiry_id}).mappings().one_or_none()
-                if row is None:
-                    transaction.commit(); return None
-                row = dict(row)
-                notes = [dict(note) for note in connection.execute(text("""
-                    SELECT n.*, c.id AS correction_id, c.replacement_note_id, c.reason AS correction_reason,
-                           c.recorded_at AS correction_recorded_at
-                    FROM cash_notes n LEFT JOIN cash_note_corrections c ON c.original_note_id=n.id
-                    WHERE n.inquiry_id=:id ORDER BY n.recorded_at, n.id
-                """), {"id": inquiry_id}).mappings()]
-                jobs = [dict(job) for job in connection.execute(text("""
-                    SELECT id, version, status, attempt_count, next_attempt_at, delivered_at, last_error_code
-                    FROM notification_jobs WHERE inquiry_id=:id ORDER BY next_attempt_at, id
-                """), {"id": inquiry_id}).mappings()]
-                result = self._detail_value(connection, row, notes, jobs)
+                result = inquiry_detail_in_transaction(connection, inquiry_id)
                 transaction.commit(); return result
             except Exception:
                 transaction.rollback(); raise
 
-    @staticmethod
-    def _detail_value(connection: Any, row: dict[str, Any], notes: list[dict[str, Any]], jobs: list[dict[str, Any]]) -> dict[str, Any]:
-        cash_notes = [{"id": str(n["id"]), "kind": n["kind"], "amount_minor": n["amount_minor"], "currency": n["currency"],
-                       "occurred_at": n["occurred_at"].isoformat(), "recorded_at": n["recorded_at"].isoformat(), "note": n["note"],
-                       "correction": None if n["correction_id"] is None else {"id": str(n["correction_id"]), "replacement_note_id": str(n["replacement_note_id"]) if n["replacement_note_id"] else None, "reason": n["correction_reason"], "recorded_at": n["correction_recorded_at"].isoformat()},
-                       "effective": n["correction_id"] is None} for n in notes]
-        summary = _summary(connection, row)
-        return {**summary, "contact_snapshot": _json(row["contact_snapshot"]),
-                "current_contact": {"kind": row["contact_kind"], "value": row["contact_value"]},
-                "selected_option_snapshot": _json(row["selection_snapshot"]),
-                "agreed_terms": {"service_option_id": str(row["service_option_id"]), "participants_count": row["participants_count"], "duration_minutes": row["duration_minutes"], "total_minor": row["total_minor"], "expected_prepayment_minor": row["expected_prepayment_minor"], "currency": row["currency"], "note": row["terms_note"]},
-                "comment": row["comment"], "owner_note": row["owner_note"], "acquisition": _json(row["acquisition"]),
-                "participation": None if row["participation_id"] is None else {"id": str(row["participation_id"]), "visit_id": str(row["visit_id"]), "joined_at": row["joined_at"].isoformat(), "visit_status": row["visit_status"], "agreed_start_at": row["agreed_start_at"].isoformat()},
-                "cash_notes": cash_notes, "notification_summary": [{"job_id": str(j["id"]), "version": j["version"], "status": j["status"], "attempt_count": j["attempt_count"], "next_attempt_at": j["next_attempt_at"].isoformat(), "delivered_at": j["delivered_at"].isoformat() if j["delivered_at"] else None, "safe_error_code": j["last_error_code"]} for j in jobs], "allowed_commands": []}
+
+def inquiry_detail_in_transaction(connection: Any, inquiry_id: UUID) -> dict[str, Any] | None:
+    """Build the documented owner detail inside the caller's transaction.
+
+    The command service calls this after its mutation and before writing the
+    idempotency receipt.  Keeping the projection here makes its persisted
+    response use exactly the same DTO semantics as the owner read endpoint.
+    """
+    query = text("""
+        SELECT i.*, i.source_kind AS channel, s.title AS service_title, t.service_option_id, t.participants_count, t.duration_minutes, t.total_minor,
+               t.expected_prepayment_minor, t.currency, t.note AS terms_note, p.id AS participation_id,
+               p.visit_id, p.joined_at, v.status AS visit_status, v.start_at AS agreed_start_at
+        FROM inquiries i JOIN inquiry_terms t ON t.inquiry_id=i.id
+        JOIN service_options o ON o.id=t.service_option_id JOIN services s ON s.id=o.service_id
+        LEFT JOIN visit_participations p ON p.inquiry_id=i.id AND p.closed_at IS NULL
+        LEFT JOIN visits v ON v.id=p.visit_id WHERE i.id=:id
+    """)
+    row = connection.execute(query, {"id": inquiry_id}).mappings().one_or_none()
+    if row is None:
+        return None
+    row = dict(row)
+    notes = [dict(note) for note in connection.execute(text("""
+        SELECT n.*, c.id AS correction_id, c.replacement_note_id, c.reason AS correction_reason,
+               c.recorded_at AS correction_recorded_at
+        FROM cash_notes n LEFT JOIN cash_note_corrections c ON c.original_note_id=n.id
+        WHERE n.inquiry_id=:id ORDER BY n.recorded_at, n.id
+    """), {"id": inquiry_id}).mappings()]
+    jobs = [dict(job) for job in connection.execute(text("""
+        SELECT id, version, status, attempt_count, next_attempt_at, delivered_at, last_error_code
+        FROM notification_jobs WHERE inquiry_id=:id ORDER BY next_attempt_at, id
+    """), {"id": inquiry_id}).mappings()]
+    return _detail_value(connection, row, notes, jobs)
+
+
+def _detail_value(connection: Any, row: dict[str, Any], notes: list[dict[str, Any]], jobs: list[dict[str, Any]]) -> dict[str, Any]:
+    cash_notes = [{"id": str(n["id"]), "kind": n["kind"], "amount_minor": n["amount_minor"], "currency": n["currency"],
+                   "occurred_at": n["occurred_at"].isoformat(), "recorded_at": n["recorded_at"].isoformat(), "note": n["note"],
+                   "correction": None if n["correction_id"] is None else {"id": str(n["correction_id"]), "replacement_note_id": str(n["replacement_note_id"]) if n["replacement_note_id"] else None, "reason": n["correction_reason"], "recorded_at": n["correction_recorded_at"].isoformat()},
+                   "effective": n["correction_id"] is None} for n in notes]
+    summary = _summary(connection, row)
+    return {**summary, "contact_snapshot": _json(row["contact_snapshot"]),
+            "current_contact": {"kind": row["contact_kind"], "value": row["contact_value"]},
+            "selected_option_snapshot": _json(row["selection_snapshot"]),
+            "agreed_terms": {"service_option_id": str(row["service_option_id"]), "participants_count": row["participants_count"], "duration_minutes": row["duration_minutes"], "total_minor": row["total_minor"], "expected_prepayment_minor": row["expected_prepayment_minor"], "currency": row["currency"], "note": row["terms_note"]},
+            "comment": row["comment"], "owner_note": row["owner_note"], "acquisition": _json(row["acquisition"]),
+            "participation": None if row["participation_id"] is None else {"id": str(row["participation_id"]), "visit_id": str(row["visit_id"]), "joined_at": row["joined_at"].isoformat(), "visit_status": row["visit_status"], "agreed_start_at": row["agreed_start_at"].isoformat()},
+            "cash_notes": cash_notes, "notification_summary": [{"job_id": str(j["id"]), "version": j["version"], "status": j["status"], "attempt_count": j["attempt_count"], "next_attempt_at": j["next_attempt_at"].isoformat(), "delivered_at": j["delivered_at"].isoformat() if j["delivered_at"] else None, "safe_error_code": j["last_error_code"]} for j in jobs], "allowed_commands": []}
