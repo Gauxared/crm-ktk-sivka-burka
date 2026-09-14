@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Конные прогулки — заявка на посещение</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="hero"><div class="wrap">
+    <p class="eyebrow">КТК «Сивка-Бурка»</p>
+    <h1>Выберите свою конную прогулку</h1>
+    <p>Посмотрите актуальные форматы и оставьте заявку — владелец свяжется с вами, чтобы согласовать детали и время.</p>
+    <a class="button" href="#catalog">Смотреть услуги</a>
+  </div></header>
+  <main class="wrap">
+    <section aria-labelledby="conditions-title" class="notice">
+      <h2 id="conditions-title">Перед визитом</h2>
+      <div id="visit-rules" class="cards">
+        <article><h3>Инструктаж</h3><p>До посадки проводится инструктаж. Для новичков есть спокойные форматы и обучение.</p></article>
+        <article><h3>Одежда и посещение</h3><p>Правила одежды и посещения уточняются по условиям актуального каталога.</p></article>
+        <article><h3>Подбор формата</h3><p>Есть варианты для детей, новичков и опытных всадников. Окончательное решение принимает владелец или тренер.</p></article>
+      </div>
+      <p class="caution">Активная прогулка с галопом требует опыта и согласования с тренером. Вес порядка 110 кг — повод заранее обсудить участие, а не автоматический отказ. Возраст, опыт и вес не являются автоматическим допуском или запретом.</p>
+    </section>
+    <section id="catalog" aria-labelledby="catalog-title"><div class="section-heading"><div><p class="eyebrow">Форматы и условия</p><h2 id="catalog-title">Актуальные услуги</h2></div><p id="catalog-status" role="status">Загружаем каталог…</p></div><div id="catalog-list" class="catalog" aria-live="polite"></div><p id="location" class="location"></p></section>
+    <section id="request" aria-labelledby="request-title" class="form-section"><h2 id="request-title">Оставить заявку</h2><p>Это подготовленная заявка, а не подтверждение бронирования. Время и возможность участия владелец согласует отдельно.</p>
+      <form id="inquiry-form" novalidate>
+        <label>Услуга <select name="service_option_id" id="service-option" required><option value="">Сначала дождитесь каталога</option></select></label>
+        <label>Имя <input name="name" required maxlength="200" autocomplete="name"></label>
+        <fieldset><legend>Как с вами связаться</legend><label>Способ <select name="contact_kind"><option value="PHONE">Телефон</option><option value="TELEGRAM">Telegram</option><option value="VK">VK</option></select></label><label>Контакт <input name="contact_value" required maxlength="200"></label></fieldset>
+        <label>Количество участников <input name="participants_count" type="number" min="1" max="20" required></label>
+        <label>Желаемая дата <input name="date" type="date" required></label>
+        <label>Желаемое время <input name="time_text" maxlength="200" placeholder="Например, после 14:00"></label>
+        <label>Опыт <select name="experience"><option value="UNKNOWN">Не уверен(а)</option><option value="BEGINNER">Новичок</option><option value="EXPERIENCED">Есть опыт</option></select></label>
+        <label>Комментарий <textarea name="comment" maxlength="2000"></textarea></label>
+        <button class="button" type="submit">Отправить заявку</button><p id="form-status" role="status" aria-live="polite"></p>
+      </form>
+    </section>
+  </main>
+  <script src="script.js" defer></script>
+</body>
+</html>
