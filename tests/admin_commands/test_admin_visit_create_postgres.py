@@ -141,9 +141,20 @@ def test_create_replay_validation_and_calendar_read_boundaries(database: Engine)
     client = client_for(database)
     csrf_token = login(client)
     headers = command_headers(csrf_token)
-    for malformed in ({}, {**visit_payload(service_id), "csrf_token": "transport"}):
-        response = client.post("/api/v1/admin/visits", headers=headers, json=malformed)
-        assert response.status_code == 422 and response.json() == {"error": {"code": "VALIDATION_ERROR"}}
+    missing_key_headers = dict(headers)
+    del missing_key_headers["Idempotency-Key"]
+    missing_key = client.post("/api/v1/admin/visits", headers=missing_key_headers, json=visit_payload(service_id))
+    assert missing_key.status_code == 422 and missing_key.json() == {"error": {"code": "VALIDATION_ERROR"}}
+    rejected = client.post("/api/v1/admin/visits", headers=headers, json={})
+    assert rejected.status_code == 422 and rejected.json() == {"error": {"code": "VALIDATION_ERROR"}}
+    transport_field = client.post(
+        "/api/v1/admin/visits",
+        headers={**headers, "Idempotency-Key": "transport-shape"},
+        json={**visit_payload(service_id), "csrf_token": "transport"},
+    )
+    assert transport_field.status_code == 422 and transport_field.json() == {"error": {"code": "VALIDATION_ERROR"}}
+    with database.connect() as connection:
+        assert connection.execute(text("SELECT count(*) FROM operation_receipts")).scalar_one() == 0
     for unavailable in (uuid4(),):
         response = client.post("/api/v1/admin/visits", headers={**headers, "Idempotency-Key": f"missing-{unavailable}"}, json=visit_payload(unavailable))
         assert response.status_code == 422 and response.json() == {"error": {"code": "OPTION_UNAVAILABLE"}}
