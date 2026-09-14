@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from uuid import UUID, uuid4
 
@@ -83,6 +84,10 @@ def _confirm(visit_id: UUID, inquiry_version: int = 1, visit_version: int = 1) -
     return {"expected_version": inquiry_version, "expected_visit_versions": {str(visit_id): visit_version}, "payload": {"visit_id": str(visit_id)}}
 
 
+def _response(result: object) -> dict[str, object]:
+    return result.response()  # type: ignore[union-attr]
+
+
 def test_create_planned_visit_is_idempotent_and_audited(seeded: tuple[OwnerCommandService, UUID, UUID], database: Engine):
     service, owner_id, service_id = seeded
     created = service.create_planned_visit(_visit_payload(service_id), "visit-key")
@@ -104,13 +109,82 @@ def test_confirm_accepts_eligible_inquiry_without_payment(seeded: tuple[OwnerCom
     result = service.confirm_inquiry(inquiry_id, _confirm(visit.visit_id), f"confirm-{status}")
     replay = service.confirm_inquiry(inquiry_id, _confirm(visit.visit_id), f"confirm-{status}")
     assert (result.inquiry_version, result.visit_version, result.replay) == (2, 2, False)
-    assert replay == type(result)(result.command_id, result.inquiry_id, 2, result.visit_id, 2, True)
+    assert replay.replay is True
+    assert _response(replay) == _response(result)
+    assert set(result.inquiry) == {
+        "id", "version", "status", "requester_name", "service_title", "participants_count",
+        "requested_time", "visit_id", "agreed_start_at", "received_at", "channel", "cash_summary",
+        "contact_snapshot", "current_contact", "selected_option_snapshot", "agreed_terms", "comment",
+        "owner_note", "acquisition", "participation", "cash_notes", "notification_summary", "allowed_commands",
+    }
+    assert result.inquiry["status"] == "CONFIRMED"
+    assert result.inquiry["participation"]["visit_id"] == str(visit.visit_id)
+    assert _response(result)["changed_visits"] == [{"id": str(visit.visit_id), "version": 2}]
     with database.connect() as connection:
         states = connection.execute(text("SELECT i.status, i.version, v.version, (SELECT count(*) FROM visit_participations p WHERE p.inquiry_id=i.id AND p.closed_at IS NULL) FROM inquiries i JOIN visits v ON v.id=:visit WHERE i.id=:inquiry"), {"inquiry": inquiry_id, "visit": visit.visit_id}).one()
         audit = connection.execute(text("""SELECT e.actor_kind, e.action, (SELECT count(*) FROM event_inquiries WHERE event_id=e.id),
             (SELECT count(*) FROM event_visits WHERE event_id=e.id) FROM change_events e WHERE e.command_id=:id"""), {"id": result.command_id}).one()
     assert states == ("CONFIRMED", 2, 2, 1)
     assert audit == ("OWNER", "INQUIRY_CONFIRMED", 1, 1)
+
+
+def test_confirmation_receipt_is_complete_and_replay_is_stable_after_read_model_changes(seeded: tuple[OwnerCommandService, UUID, UUID], database: Engine):
+    service, _, service_id = seeded
+    inquiry_id = _inquiry(database, service_id=service_id)
+    visit = service.create_planned_visit(_visit_payload(service_id), "stable-receipt-visit")
+    first = service.confirm_inquiry(inquiry_id, _confirm(visit.visit_id), "stable-receipt")
+    first_response = _response(first)
+    with database.connect() as connection:
+        stored = connection.execute(text("""SELECT result_json FROM operation_receipts
+            WHERE id=:id"""), {"id": first.command_id}).scalar_one()
+    assert json.loads(json.dumps(stored)) == first_response
+
+    with database.begin() as connection:
+        connection.execute(text("""UPDATE inquiries SET requester_name='Changed later', contact_value='+79999999999',
+            contact_snapshot=CAST(:contact AS jsonb), selection_snapshot=CAST(:selection AS jsonb),
+            owner_note='Changed later' WHERE id=:id"""), {
+            "id": inquiry_id, "contact": json.dumps({"changed": True}), "selection": json.dumps({"changed": True}),
+        })
+    replay = service.confirm_inquiry(inquiry_id, _confirm(visit.visit_id), "stable-receipt")
+    assert replay.replay is True
+    assert json.dumps(_response(replay), separators=(",", ":"), sort_keys=True) == json.dumps(first_response, separators=(",", ":"), sort_keys=True)
+    assert replay.inquiry["requester_name"] == "Synthetic"
+    assert replay.inquiry["contact_snapshot"] == {}
+
+
+@pytest.mark.parametrize("state", ["tombstoned", "incomplete"])
+def test_confirmation_replay_with_expired_or_incomplete_result_is_not_reexecuted(seeded: tuple[OwnerCommandService, UUID, UUID], database: Engine, state: str):
+    service, _, service_id = seeded
+    inquiry_id = _inquiry(database, service_id=service_id)
+    visit = service.create_planned_visit(_visit_payload(service_id), f"expired-{state}")
+    accepted = service.confirm_inquiry(inquiry_id, _confirm(visit.visit_id), f"expired-{state}")
+    with database.begin() as connection:
+        if state == "tombstoned":
+            connection.execute(text("""UPDATE operation_receipts SET result_json=NULL, result_expires_at=NULL,
+                tombstoned_at=now() WHERE id=:id"""), {"id": accepted.command_id})
+        else:
+            connection.execute(text("UPDATE operation_receipts SET result_json=CAST(:result AS jsonb) WHERE id=:id"), {
+                "id": accepted.command_id,
+                "result": json.dumps({"command_id": str(accepted.command_id), "inquiry": {"id": str(inquiry_id), "version": 2}, "changed_visits": [{"id": str(visit.visit_id), "version": 2}]}),
+            })
+    with pytest.raises(OwnerCommandError, match="RESULT_EXPIRED"):
+        service.confirm_inquiry(inquiry_id, _confirm(visit.visit_id), f"expired-{state}")
+    with database.connect() as connection:
+        assert connection.execute(text("SELECT count(*) FROM visit_participations WHERE inquiry_id=:id"), {"id": inquiry_id}).scalar_one() == 1
+        assert connection.execute(text("SELECT count(*) FROM change_events WHERE command_id=:id"), {"id": accepted.command_id}).scalar_one() == 1
+
+
+def test_confirmation_reused_key_with_changed_payload_is_rejected_without_extra_writes(seeded: tuple[OwnerCommandService, UUID, UUID], database: Engine):
+    service, _, service_id = seeded
+    inquiry_id = _inquiry(database, service_id=service_id)
+    first = service.create_planned_visit(_visit_payload(service_id), "mismatch-first")
+    second = service.create_planned_visit(_visit_payload(service_id), "mismatch-second")
+    accepted = service.confirm_inquiry(inquiry_id, _confirm(first.visit_id), "confirmation-mismatch")
+    with pytest.raises(OwnerCommandError, match="IDEMPOTENCY_MISMATCH"):
+        service.confirm_inquiry(inquiry_id, _confirm(second.visit_id, inquiry_version=2), "confirmation-mismatch")
+    with database.connect() as connection:
+        assert connection.execute(text("SELECT count(*) FROM visit_participations WHERE inquiry_id=:id"), {"id": inquiry_id}).scalar_one() == 1
+        assert connection.execute(text("SELECT count(*) FROM change_events WHERE command_id=:id"), {"id": accepted.command_id}).scalar_one() == 1
 
 
 def test_confirmation_rejection_is_atomic_and_key_is_not_consumed(seeded: tuple[OwnerCommandService, UUID, UUID], database: Engine):
