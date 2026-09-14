@@ -3,7 +3,7 @@
 from fastapi.testclient import TestClient
 import pytest
 
-from sivka_burka_api.admin_inquiries import InvalidInquiryCursor, _cursor_decode, _cursor_encode
+from sivka_burka_api.admin_inquiries import InvalidInquiryCursor, _cursor_decode, _cursor_encode, _json
 from sivka_burka_api.main import create_app
 
 
@@ -29,3 +29,8 @@ def test_cursor_is_opaque_and_bound_to_every_active_filter():
     assert str(inquiry_id) == "12345678-1234-5678-1234-567812345678"
     with pytest.raises(InvalidInquiryCursor):
         _cursor_decode(cursor, {**filters, "status": "CONFIRMED"})
+
+
+@pytest.mark.parametrize(("value", "expected"), [(b'{"source":"synthetic"}', {"source": "synthetic"}), ('{"source":"synthetic"}', {"source": "synthetic"}), ("not-json", {})])
+def test_jsonb_read_values_are_safe_when_a_driver_returns_text(value, expected):
+    assert _json(value) == expected

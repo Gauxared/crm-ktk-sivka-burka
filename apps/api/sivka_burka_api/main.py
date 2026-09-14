@@ -158,7 +158,16 @@ def create_app(*, public_submission_runtime: PublicSubmissionRuntime | None = No
         if isinstance(session_runtime, JSONResponse):
             return session_runtime
         token = request.cookies.get(COOKIE_NAME)
-        if not token or session_runtime.active_session(token) is None:
+        if not token:
+            return private_unauthorized()
+        try:
+            session = session_runtime.active_session(token)
+        except Exception:
+            # Session validation is an authorization boundary.  An invalid
+            # token or a failed validation must never fall through to a CRM
+            # read response.
+            return private_unauthorized()
+        if session is None:
             return private_unauthorized()
         if admin_inquiry_read_runtime is None:
             return _error("ADMIN_INQUIRIES_UNAVAILABLE", 503)

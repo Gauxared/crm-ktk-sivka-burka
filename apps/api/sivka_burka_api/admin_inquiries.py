@@ -6,7 +6,7 @@ from base64 import urlsafe_b64decode, urlsafe_b64encode
 from dataclasses import dataclass
 from datetime import datetime
 import json
-from typing import Any
+from typing import Any, Mapping
 from uuid import UUID
 
 from sqlalchemy import Engine, text
@@ -39,7 +39,27 @@ def _cursor_decode(cursor: str, filters: dict[str, Any]) -> tuple[datetime, UUID
 
 
 def _json(value: Any) -> Any:
-    return value if value is not None else {}
+    """Return JSONB values in a form FastAPI can safely serialize.
+
+    psycopg normally decodes JSONB to Python objects, while alternate driver
+    configurations can return its textual representation.  The read model
+    accepts both without exposing an undecodable value as an internal error.
+    """
+    if value is None:
+        return {}
+    if isinstance(value, Mapping):
+        return dict(value)
+    if isinstance(value, (bytes, bytearray)):
+        try:
+            value = value.decode("utf-8")
+        except UnicodeDecodeError:
+            return {}
+    if isinstance(value, str):
+        try:
+            return json.loads(value)
+        except json.JSONDecodeError:
+            return {}
+    return value
 
 
 def _cash_summary(connection: Any, inquiry_id: UUID, total_minor: int | None) -> dict[str, Any]:
@@ -117,7 +137,7 @@ class AdminInquiryReader:
 
     def detail(self, inquiry_id: UUID) -> dict[str, Any] | None:
         query = text("""
-            SELECT i.*, s.title AS service_title, t.service_option_id, t.participants_count, t.duration_minutes, t.total_minor,
+            SELECT i.*, i.source_kind AS channel, s.title AS service_title, t.service_option_id, t.participants_count, t.duration_minutes, t.total_minor,
                    t.expected_prepayment_minor, t.currency, t.note AS terms_note, p.id AS participation_id,
                    p.visit_id, p.joined_at, v.status AS visit_status, v.start_at AS agreed_start_at
             FROM inquiries i JOIN inquiry_terms t ON t.inquiry_id=i.id
