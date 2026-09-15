@@ -371,3 +371,129 @@ def test_cash_note_receipt_replay_is_stable_and_expired_or_mismatched_never_reex
         service.record_cash_note(inquiry_id, _cash(), "cash-stable")
     with database.connect() as connection:
         assert connection.execute(text("SELECT count(*) FROM cash_notes WHERE inquiry_id=:id"), {"id": inquiry_id}).scalar_one() == 2
+
+
+def _correction(expected_version: int, *, expected_visit_versions: dict[str, int] | None = None, replacement: dict[str, object] | None = None, reason: str = "factual correction") -> dict[str, object]:
+    payload: dict[str, object] = {"expected_version": expected_version, "reason": reason, "replacement": replacement}
+    if expected_visit_versions is not None:
+        payload["expected_visit_versions"] = expected_visit_versions
+    return payload
+
+
+def _first_note_id(database: Engine, inquiry_id: UUID) -> UUID:
+    with database.connect() as connection:
+        return connection.execute(text("SELECT id FROM cash_notes WHERE inquiry_id=:id ORDER BY recorded_at, id LIMIT 1"), {"id": inquiry_id}).scalar_one()
+
+
+def test_cash_correction_null_preserves_history_and_updates_effective_summary(seeded: tuple[OwnerCommandService, UUID, UUID], database: Engine):
+    service, owner_id, service_id = seeded
+    inquiry_id = _inquiry(database, service_id=service_id)
+    recorded = service.record_cash_note(inquiry_id, _cash(), "correction-null-record")
+    note_id = _first_note_id(database, inquiry_id)
+    corrected = service.correct_cash_note(inquiry_id, note_id, _correction(2), "correction-null")
+    assert corrected.inquiry["cash_summary"]["received_minor"] == 0
+    assert corrected.inquiry["cash_summary"]["net_received_minor"] == 0
+    assert corrected.inquiry["cash_notes"][0]["effective"] is False
+    with database.connect() as connection:
+        row = connection.execute(text("SELECT kind, amount_minor, owner_id FROM cash_notes WHERE id=:id"), {"id": note_id}).one()
+        links = connection.execute(text("""SELECT
+            (SELECT count(*) FROM cash_note_corrections WHERE original_note_id=:note),
+            (SELECT count(*) FROM receipt_inquiries WHERE receipt_id=:command AND inquiry_id=:inquiry),
+            (SELECT e.action FROM change_events e WHERE e.command_id=:command),
+            (SELECT count(*) FROM event_inquiries ei JOIN change_events e ON e.id=ei.event_id WHERE e.command_id=:command)
+        """), {"note": note_id, "command": corrected.command_id, "inquiry": inquiry_id}).one()
+    assert row == ("RECEIPT", 1750, owner_id)
+    assert links == (1, 1, "CASH_NOTE_CORRECTED", 1)
+    assert recorded.inquiry["version"] == 2 and corrected.inquiry["version"] == 3
+
+
+def test_cash_correction_replacement_has_new_effective_fact_and_superseded_is_atomic(seeded: tuple[OwnerCommandService, UUID, UUID], database: Engine):
+    service, _, service_id = seeded
+    inquiry_id = _inquiry(database, service_id=service_id)
+    service.record_cash_note(inquiry_id, _cash(), "correction-replace-record")
+    original = _first_note_id(database, inquiry_id)
+    replacement = {"kind": "REFUND_NOTE", "amount_minor": 500, "occurred_at": "2026-10-03T10:00:00Z", "note": "returned"}
+    result = service.correct_cash_note(inquiry_id, original, _correction(2, replacement=replacement), "correction-replace")
+    assert result.inquiry["cash_summary"] == {"received_minor": 0, "returned_minor": 500, "net_received_minor": -500, "total_minor": None, "balance_minor": None, "calculation_warning": "DATA_REVIEW_REQUIRED"}
+    assert len(result.inquiry["cash_notes"]) == 2
+    assert result.inquiry["cash_notes"][0]["effective"] is False and result.inquiry["cash_notes"][1]["effective"] is True
+    with pytest.raises(OwnerCommandError, match="CASH_NOTE_SUPERSEDED"):
+        service.correct_cash_note(inquiry_id, original, _correction(3), "correction-second-key")
+    with database.connect() as connection:
+        assert connection.execute(text("SELECT count(*) FROM cash_notes WHERE inquiry_id=:id"), {"id": inquiry_id}).scalar_one() == 2
+        assert connection.execute(text("SELECT count(*) FROM cash_note_corrections WHERE original_note_id=:id"), {"id": original}).scalar_one() == 1
+
+
+def test_cash_correction_isolates_foreign_note_and_replays_stable_expired_or_mismatch(seeded: tuple[OwnerCommandService, UUID, UUID], database: Engine):
+    service, _, service_id = seeded
+    first, second = _inquiry(database, service_id=service_id), _inquiry(database, service_id=service_id)
+    service.record_cash_note(first, _cash(), "correction-isolation-record")
+    foreign = service.record_cash_note(second, _cash(), "correction-foreign-record")
+    foreign_id = _first_note_id(database, second)
+    with pytest.raises(OwnerCommandError, match="NOT_FOUND"):
+        service.correct_cash_note(first, foreign_id, _correction(2), "correction-foreign")
+    original = _first_note_id(database, first)
+    accepted = service.correct_cash_note(first, original, _correction(2), "correction-stable")
+    with database.begin() as connection:
+        connection.execute(text("UPDATE inquiries SET requester_name='Later' WHERE id=:id"), {"id": first})
+    assert service.correct_cash_note(first, original, _correction(2), "correction-stable").response() == accepted.response()
+    with pytest.raises(OwnerCommandError, match="IDEMPOTENCY_MISMATCH"):
+        service.correct_cash_note(first, original, _correction(2, reason="different"), "correction-stable")
+    with database.begin() as connection:
+        connection.execute(text("UPDATE operation_receipts SET result_json=NULL, tombstoned_at=now() WHERE id=:id"), {"id": accepted.command_id})
+    with pytest.raises(OwnerCommandError, match="RESULT_EXPIRED"):
+        service.correct_cash_note(first, original, _correction(2), "correction-stable")
+    assert foreign.inquiry["version"] == 2
+
+
+@pytest.mark.parametrize("status", ["NEW", "NEGOTIATING", "CONFIRMED", "COMPLETED", "CANCELLED"])
+def test_cash_correction_preserves_status_and_requires_active_visit_versions(seeded: tuple[OwnerCommandService, UUID, UUID], database: Engine, status: str):
+    service, _, service_id = seeded
+    inquiry_id = _inquiry(database, "NEW" if status in {"CONFIRMED", "COMPLETED", "CANCELLED"} else status, service_id=service_id)
+    visit_versions = None
+    if status in {"CONFIRMED", "COMPLETED", "CANCELLED"}:
+        visit = service.create_planned_visit(_visit_payload(service_id), f"correction-visit-{status}")
+        service.confirm_inquiry(inquiry_id, _confirm(visit.visit_id), f"correction-confirm-{status}")
+        with database.begin() as connection:
+            if status != "CONFIRMED":
+                connection.execute(text("UPDATE inquiries SET status=:status WHERE id=:id"), {"status": status, "id": inquiry_id})
+        service.record_cash_note(inquiry_id, _cash(2, expected_visit_versions={str(visit.visit_id): 2}), f"correction-record-{status}")
+        visit_versions = {str(visit.visit_id): 3}
+        note_id = _first_note_id(database, inquiry_id)
+        corrected = service.correct_cash_note(inquiry_id, note_id, _correction(3, expected_visit_versions=visit_versions), f"correction-final-{status}")
+    else:
+        service.record_cash_note(inquiry_id, _cash(), f"correction-record-{status}")
+        note_id = _first_note_id(database, inquiry_id)
+        corrected = service.correct_cash_note(inquiry_id, note_id, _correction(2), f"correction-final-{status}")
+    assert corrected.inquiry["status"] == status
+
+
+def test_cash_correction_rejections_are_atomic_and_reason_key_remains_reusable(seeded: tuple[OwnerCommandService, UUID, UUID], database: Engine):
+    service, _, service_id = seeded
+    inquiry_id = _inquiry(database, service_id=service_id)
+    visit = service.create_planned_visit(_visit_payload(service_id), "correction-atomic-visit")
+    service.confirm_inquiry(inquiry_id, _confirm(visit.visit_id), "correction-atomic-confirm")
+    service.record_cash_note(inquiry_id, _cash(2, expected_visit_versions={str(visit.visit_id): 2}), "correction-atomic-record")
+    note_id = _first_note_id(database, inquiry_id)
+    key = "correction-atomic-reusable"
+    invalid_payloads = [_correction(3), _correction(3, expected_visit_versions={str(visit.visit_id): 2}), _correction(2, expected_visit_versions={str(visit.visit_id): 1})]
+    for payload in invalid_payloads:
+        with pytest.raises(OwnerCommandError, match="EXPECTED_VERSION_REQUIRED|VERSION_CONFLICT"):
+            service.correct_cash_note(inquiry_id, note_id, payload, key)
+    with database.connect() as connection:
+        before = connection.execute(text("""SELECT i.version, v.version,
+            (SELECT count(*) FROM cash_note_corrections), (SELECT count(*) FROM cash_notes),
+            (SELECT count(*) FROM operation_receipts WHERE canonical_path LIKE :path),
+            (SELECT count(*) FROM change_events) FROM inquiries i JOIN visits v ON v.id=:visit WHERE i.id=:inquiry"""), {"inquiry": inquiry_id, "visit": visit.visit_id, "path": f"%{note_id}/corrections"}).one()
+    long_key = "correction-long-reason"
+    with pytest.raises(OwnerCommandError, match="VALIDATION_ERROR"):
+        service.correct_cash_note(inquiry_id, note_id, _correction(3, expected_visit_versions={str(visit.visit_id): 3}, reason="x" * 501), long_key)
+    accepted = service.correct_cash_note(inquiry_id, note_id, _correction(3, expected_visit_versions={str(visit.visit_id): 3}), long_key)
+    assert accepted.inquiry["version"] == 4
+    with database.connect() as connection:
+        after = connection.execute(text("""SELECT i.version, v.version,
+            (SELECT count(*) FROM cash_note_corrections), (SELECT count(*) FROM cash_notes),
+            (SELECT count(*) FROM operation_receipts WHERE canonical_path LIKE :path),
+            (SELECT count(*) FROM change_events) FROM inquiries i JOIN visits v ON v.id=:visit WHERE i.id=:inquiry"""), {"inquiry": inquiry_id, "visit": visit.visit_id, "path": f"%{note_id}/corrections"}).one()
+    assert before == (3, 3, 0, 1, 0, 3)
+    assert after == (4, 4, 1, 1, 1, 4)
