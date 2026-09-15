@@ -231,6 +231,11 @@ def test_cash_note_correction_browser_boundary_strict_uuid_and_key_reuse(databas
     assert client.post(correction_target, headers={**headers("wrong", "bad-csrf")}, json=body).status_code == 403
     assert client.post(correction_target, headers={**headers(csrf_token, "bad-media"), "Content-Type": "text/plain"}, content="{}").status_code == 415
     assert client.post(correction_target, headers=headers(csrf_token, "strict"), json={**body, "extra": True}).status_code == 422
+    invalid_replacement = {"kind": "RECEIPT", "amount_minor": 175_000, "occurred_at": "2026-10-01T08:00:00Z", "note": "Synthetic cash fact", "extra": True}
+    nested_rejected = client.post(correction_target, headers=headers(csrf_token, "nested"), json={**body, "replacement": invalid_replacement})
+    assert nested_rejected.status_code == 422 and nested_rejected.json() == {"error": {"code": "VALIDATION_ERROR"}}
+    with database.connect() as connection:
+        assert connection.execute(text("SELECT count(*) FROM cash_note_corrections")).scalar_one() == 0
     assert client.post(correction_target, headers={**headers(csrf_token, "strict")}, json=body).status_code == 200
     malformed = client.post(f"{target}/not-a-uuid/corrections", headers=headers(csrf_token, "malformed"), json=body)
     assert malformed.status_code == 404 and malformed.json() == {"error": {"code": "NOT_FOUND"}}
@@ -246,9 +251,9 @@ def test_cash_note_correction_null_replacement_replay_superseded_and_audit(datab
     data = recorded.json()["data"]
     note_id = UUID(data["inquiry"]["cash_notes"][0]["id"])
     target = f"{source}/{note_id}/corrections"
-    request_headers = headers(csrf_token, "correction")
+    request_headers = headers(csrf_token, "too-long")
     body = correction_payload(note_id)
-    too_long = client.post(target, headers=headers(csrf_token, "too-long"), json=correction_payload(note_id, reason="x" * 501))
+    too_long = client.post(target, headers=request_headers, json=correction_payload(note_id, reason="x" * 501))
     assert too_long.status_code == 422
     first = client.post(target, headers=request_headers, json=body)
     assert first.status_code == 200 and first.headers["cache-control"] == "no-store"
