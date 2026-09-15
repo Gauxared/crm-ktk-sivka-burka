@@ -1,0 +1,51 @@
+{
+  "id": "API-004",
+  "title": "Expose authenticated owner cash-note correction",
+  "type": "implementation",
+  "status": "BACKLOG",
+  "priority": "high",
+  "executor": {"preferred": "cloud", "fallback": "cloud"},
+  "reviewer": "cloud",
+  "depends_on": ["AUTH-003", "API-003", "CASH-002"],
+  "allowed_paths": [
+    "apps/api/sivka_burka_api/main.py",
+    "tests/admin_commands/**",
+    "tasks/specs/API-004.json"
+  ],
+  "forbidden_paths": [
+    ".env", ".env.*", "alembic/**", "apps/api/sivka_burka_api/admin_sessions.py",
+    "apps/api/sivka_burka_api/admin_commands.py", "apps/api/sivka_burka_api/owner_commands.py",
+    "apps/api/sivka_burka_api/admin_inquiries.py", "apps/api/sivka_burka_api/admin_visits.py",
+    "apps/api/sivka_burka_api/inquiries.py", "apps/web/**", "docs/**", "scripts/**",
+    "pyproject.toml", "apps/bots/**", "packages/**"
+  ],
+  "context": [
+    "AGENTS.md", "docs/development-pipeline.md", "docs/api.md", "docs/booking-flow.md",
+    "apps/api/sivka_burka_api/main.py", "apps/api/sivka_burka_api/owner_commands.py",
+    "tests/admin_commands/test_admin_cash_notes_postgres.py"
+  ],
+  "requirements": [
+    "Expose POST /api/v1/admin/inquiries/{inquiry_id}/cash-notes/{note_id}/corrections solely as an adapter for OwnerCommandService.correct_cash_note. Accept strict JSON: expected_version, reason, replacement null or exactly {kind RECEIPT|REFUND_NOTE, amount_minor, occurred_at, note}, and optional expected_visit_versions. Do not alter or duplicate core business validation.",
+    "Require a valid owner session, exact trusted Origin, application/json, matching X-CSRF-Token and Idempotency-Key before dispatch. Reuse established no-store errors: 401 AUTH_REQUIRED; 403 FORBIDDEN or CSRF_FAILED; 415 UNSUPPORTED_MEDIA_TYPE. A malformed inquiry_id or note_id returns 404 without dispatch.",
+    "On first acceptance return 200 {data:{command_id,inquiry,changed_visits}}. An accepted identical replay returns exactly the stored data and Idempotent-Replay:true. Strict shape and browser-boundary failures reject before consuming the idempotency key.",
+    "Map NOT_FOUND to 404; IDEMPOTENCY_MISMATCH, VERSION_CONFLICT and CASH_NOTE_SUPERSEDED to 409; RESULT_EXPIRED to 410; EXPECTED_VERSION_REQUIRED and all correction input validation failures to 422 without diagnostics. Keep the existing record-cash-note mapping correct.",
+    "Add isolated synthetic PostgreSQL route tests for browser boundary, strict correction body including 500-character reason limit and null/replacement shape, unplanned/planned version cases, null and replacement response effects, replay/mismatch/expiry, superseded and foreign note mappings, audit persistence and status invariance. Never read local .env or configured source database.",
+    "Do not modify core, add payments, checkout, webhooks, frontend, migrations, secrets, bot adapters or external calls."
+  ],
+  "acceptance": [
+    "A signed-in owner can correct a factual receipt/refund note through HTTP while retaining append-only history and without changing service status.",
+    "Browser state, versions and idempotency prevent duplicate or partial corrections and surface safe documented errors.",
+    "Focused synthetic PostgreSQL route tests, scope and whitespace checks pass."
+  ],
+  "validation": [
+    {"name": "API-004 tests", "argv": ["{python}", "-m", "pytest", "tests/admin_commands", "-q"], "timeout": 180},
+    {"name": "whitespace", "argv": ["git", "diff", "--check"], "timeout": 10}
+  ],
+  "risk": "high",
+  "retry_limit": 0,
+  "shared_paths_approval": {
+    "paths": ["apps/api/sivka_burka_api/main.py", "tests/admin_commands/**", "tasks/specs/API-004.json"],
+    "reviewer": "cloud:codex",
+    "reason": "Accepted narrow HTTP adapter over reviewed append-only cash-correction core, with no payment execution or other public surface."
+  }
+}
