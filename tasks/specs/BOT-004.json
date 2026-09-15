@@ -1,0 +1,37 @@
+{
+  "id": "BOT-004",
+  "title": "Submit a channel draft as one transactional inquiry",
+  "type": "implementation",
+  "status": "BACKLOG",
+  "priority": "high",
+  "executor": {"preferred": "cloud", "fallback": "cloud"},
+  "reviewer": "cloud",
+  "depends_on": ["BOT-003", "APP-001", "DB-005"],
+  "allowed_paths": ["apps/api/sivka_burka_api/channel_gateway.py", "apps/api/sivka_burka_api/channel_draft_persistence.py", "tests/channel_gateway/**", "tasks/specs/BOT-004.json"],
+  "forbidden_paths": [".env", ".env.*", "alembic/**", "apps/api/sivka_burka_api/main.py", "apps/api/sivka_burka_api/inquiries.py", "apps/web/**", "apps/bots/**", "packages/**", "docs/**", "config/**", "pyproject.toml"],
+  "context": ["AGENTS.md", "docs/development-pipeline.md", "docs/api.md", "docs/domain-model.md", "docs/database.md", "tasks/specs/BOT-002.json", "tasks/specs/BOT-003.json", "tasks/specs/APP-001.json", "tasks/specs/DB-005.json", "apps/api/sivka_burka_api/channel_gateway.py", "apps/api/sivka_burka_api/channel_draft_persistence.py", "apps/api/sivka_burka_api/inquiries.py", "tests/channel_gateway"],
+  "requirements": [
+    "Implement PostgresChannelDraftPort.submit_inquiry for the existing trusted ChannelGateway contract. Accept strict normalized business fields without a public submission token; require an existing non-expired open draft at exactly draft_version and an existing trusted ChannelIdentity. Do not create or merge identities or contact cards.",
+    "In one business_write_guard transaction, validate an active catalog option, reuse the identity contact, create NEW Inquiry and InquiryTerms with channel source/snapshots, close and increment the draft, store a CHANNEL_EVENT receipt and channel event, link receipt/audit to the inquiry, and create the existing blocked owner notification job. Commit precedes any success result.",
+    "Deduplicate the trusted submit_event_id across every outcome in the same platform/integration namespace. Identical accepted submit replays return the same receipt and inquiry without consulting the now-closed draft; changed fields, changed draft version, or reuse of an event previously accepted for SaveDraft/ResetDraft returns IDEMPOTENCY_MISMATCH without mutation. A tombstoned result returns RESULT_EXPIRED.",
+    "Validate complete nested requester, optional self-reported contact, requested date/time, participant range, experience and comment before mutation. When contact is omitted, derive the current contact kind/value only from the trusted channel platform and external_sender_id; user data cannot override channel_identity_id or source_kind.",
+    "Preserve Telegram/VK namespace separation, catalog truth, existing pricing/snapshot semantics and privacy-preserving HMAC markers. Rejected identity, draft/version, input or option cases create no inquiry, receipt, channel event, audit, job or partial draft change.",
+    "Add isolated disposable PostgreSQL tests for success, trusted contact reuse, atomic records, stable replay, mismatch including cross-operation event reuse, stale/expired draft, inactive option, strict input, tombstone and Telegram/VK namespace behavior. No SDK, webhook/HTTP route, external call, credential, migration, outbound delivery or bot conversation step table is added."
+  ],
+  "acceptance": [
+    "A trusted Telegram or VK adapter can turn exactly one current draft version into one CRM inquiry and safe receipt without a public submission token.",
+    "Event, optimistic version and transaction boundaries prevent duplicate or partial inquiries while preserving cross-platform namespaces.",
+    "Focused channel gateway tests, scope and whitespace checks pass."
+  ],
+  "validation": [
+    {"name": "channel gateway tests", "argv": ["{python}", "-m", "pytest", "tests/channel_gateway", "-q"], "timeout": 180},
+    {"name": "whitespace", "argv": ["git", "diff", "--check"], "timeout": 10}
+  ],
+  "risk": "high",
+  "retry_limit": 0,
+  "shared_paths_approval": {
+    "paths": ["apps/api/sivka_burka_api/channel_gateway.py", "apps/api/sivka_burka_api/channel_draft_persistence.py", "tests/channel_gateway/**", "tasks/specs/BOT-004.json"],
+    "reviewer": "cloud:codex",
+    "reason": "Accepted transactional bridge from reviewed channel drafts into the existing CRM inquiry and notification persistence model."
+  }
+}

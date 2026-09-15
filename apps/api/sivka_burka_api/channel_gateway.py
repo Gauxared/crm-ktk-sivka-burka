@@ -6,6 +6,7 @@ event model.  Adapters validate platform authenticity before constructing Contex
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import date
 from enum import Enum
 from typing import Any, Mapping, Protocol, Sequence
 
@@ -63,6 +64,7 @@ class DraftSaved:
 class InquiryReceipt:
     receipt_id: str
     inquiry_id: str
+    replay: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -81,6 +83,9 @@ class ChannelPort(Protocol):
 
 _ID_FIELDS = frozenset({"integration_id", "external_sender_id", "conversation_id", "event_id"})
 _BUSINESS_FIELDS = frozenset({"service_option_id", "requester", "participants_count", "requested_time", "experience", "comment"})
+_REQUESTER_FIELDS = frozenset({"name", "contact"})
+_CONTACT_FIELDS = frozenset({"kind", "value"})
+_REQUESTED_TIME_FIELDS = frozenset({"date", "time_text"})
 
 
 def _id(value: Any, field: str) -> str:
@@ -99,6 +104,75 @@ def _mapping(value: Any, allowed: frozenset[str], code: str) -> Mapping[str, Any
     if not isinstance(value, Mapping) or not set(value).issubset(allowed):
         raise GatewayError(code)
     return value
+
+
+def _text(value: Any, code: str, max_length: int, *, optional: bool = False) -> str | None:
+    if value is None and optional:
+        return None
+    if not isinstance(value, str) or len(value) > max_length:
+        raise GatewayError(code)
+    normalized = value.strip()
+    if not normalized and not optional:
+        raise GatewayError(code)
+    return normalized or None
+
+
+def _submission_fields(context: ChannelContext, value: Mapping[str, Any]) -> dict[str, Any]:
+    clean = _mapping(value, _BUSINESS_FIELDS, "UNKNOWN_FIELD")
+    required = {"service_option_id", "requester", "participants_count", "requested_time"}
+    if not required.issubset(clean):
+        raise GatewayError("INVALID_FORM")
+
+    requester = _mapping(clean["requester"], _REQUESTER_FIELDS, "INVALID_FORM")
+    if "name" not in requester:
+        raise GatewayError("INVALID_FORM")
+    normalized_requester: dict[str, Any] = {
+        "name": _text(requester["name"], "INVALID_FORM", 200)
+    }
+    if requester.get("contact") is not None:
+        contact = _mapping(requester["contact"], _CONTACT_FIELDS, "INVALID_FORM")
+        if set(contact) != _CONTACT_FIELDS:
+            raise GatewayError("INVALID_FORM")
+        kind = _text(contact["kind"], "INVALID_FORM", 20)
+        assert kind is not None
+        kind = kind.upper()
+        if kind not in {"PHONE", "TELEGRAM", "VK"}:
+            raise GatewayError("INVALID_FORM")
+        normalized_requester["contact"] = {
+            "kind": kind,
+            "value": _text(contact["value"], "INVALID_FORM", 300),
+        }
+
+    requested = _mapping(clean["requested_time"], _REQUESTED_TIME_FIELDS, "INVALID_FORM")
+    if "date" not in requested:
+        raise GatewayError("INVALID_FORM")
+    if not isinstance(requested["date"], str):
+        raise GatewayError("INVALID_FORM")
+    try:
+        requested_date = date.fromisoformat(requested["date"]).isoformat()
+    except (TypeError, ValueError):
+        raise GatewayError("INVALID_FORM") from None
+    time_text = _text(requested.get("time_text"), "INVALID_FORM", 200, optional=True)
+
+    option_id = _text(clean["service_option_id"], "INVALID_FORM", 100)
+    participants = clean["participants_count"]
+    if isinstance(participants, bool) or not isinstance(participants, int) or not 1 <= participants <= 100:
+        raise GatewayError("INVALID_FORM")
+    experience = str(clean.get("experience", "UNKNOWN")).upper()
+    if experience not in {"BEGINNER", "EXPERIENCED", "UNKNOWN"}:
+        raise GatewayError("INVALID_FORM")
+    comment = clean.get("comment", "")
+    if not isinstance(comment, str) or len(comment) > 2000:
+        raise GatewayError("INVALID_FORM")
+
+    return {
+        "service_option_id": option_id,
+        "requester": normalized_requester,
+        "participants_count": participants,
+        "requested_time": {"date": requested_date, "time_text": time_text},
+        "experience": experience,
+        "comment": comment.strip(),
+    }
 
 
 def validate_context(context: ChannelContext) -> ChannelContext:
@@ -140,12 +214,8 @@ class ChannelGateway:
         _id(submit_event_id, "submit_event_id")
         if submit_event_id != context.event_id:
             raise GatewayError("INVALID_EVENT")
-        clean = _mapping(fields, _BUSINESS_FIELDS, "UNKNOWN_FIELD")
-        if not isinstance(clean.get("service_option_id"), str) or not clean["service_option_id"]:
-            raise GatewayError("INVALID_FORM")
-        if isinstance(clean.get("participants_count"), bool) or not isinstance(clean.get("participants_count"), int) or clean["participants_count"] < 1:
-            raise GatewayError("INVALID_FORM")
-        return self._port.submit_inquiry(context, dict(clean), draft_version, submit_event_id)
+        clean = _submission_fields(context, fields)
+        return self._port.submit_inquiry(context, clean, draft_version, submit_event_id)
 
     def reset_draft(self, context: ChannelContext, *, expected_version: int, event_id: str) -> ResetResult:
         context = validate_context(context)
