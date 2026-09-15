@@ -134,6 +134,74 @@ def negotiation_envelope(*, inquiry_version: object = 1, expected_visit_versions
     }
 
 
+def complete_envelope(visit_id: UUID, *, inquiry_version: int = 2, visit_version: int = 2) -> dict[str, object]:
+    return {"type": "COMPLETE", "expected_version": inquiry_version, "expected_visit_versions": {str(visit_id): visit_version}, "payload": {}}
+
+
+def test_complete_success_without_cash_closes_participation_and_audits(database: Engine):
+    owner_id, service_id = seed(database)
+    inquiry_id = create_inquiry(database, service_id)
+    service = OwnerCommandService(database, owner_id, hmac_secret=COMMAND_SECRET, digest_key_version=3)
+    visit_id = visit(service, service_id, "complete-success-visit")
+    client, csrf_token = client_for(database), None
+    csrf_token = login(client)
+    target = f"/api/v1/admin/inquiries/{inquiry_id}/commands"
+    assert client.post(target, headers=headers(csrf_token, "complete-confirm"), json=envelope(visit_id)).status_code == 200
+    response = client.post(target, headers=headers(csrf_token, "complete-success"), json=complete_envelope(visit_id))
+    assert response.status_code == 200 and response.headers["cache-control"] == "no-store"
+    data = response.json()["data"]
+    assert data["inquiry"]["status"] == "COMPLETED"
+    assert data["inquiry"].get("participation") is None
+    assert data["changed_visits"] == [{"id": str(visit_id), "version": 3}]
+    with database.connect() as connection:
+        assert connection.execute(text("SELECT status, version FROM inquiries WHERE id=:id"), {"id": inquiry_id}).one() == ("COMPLETED", 3)
+        assert connection.execute(text("SELECT status, version FROM visits WHERE id=:id"), {"id": visit_id}).one() == ("PLANNED", 3)
+        assert connection.execute(text("SELECT closed_at, close_kind FROM visit_participations WHERE inquiry_id=:id"), {"id": inquiry_id}).one()[1] == "PROVIDED"
+        assert connection.execute(text("SELECT count(*) FROM cash_notes WHERE inquiry_id=:id"), {"id": inquiry_id}).scalar_one() == 0
+        assert connection.execute(text("SELECT count(*) FROM change_events e JOIN event_inquiries ei ON ei.event_id=e.id WHERE e.action='INQUIRY_COMPLETED' AND ei.inquiry_id=:id"), {"id": inquiry_id}).scalar_one() == 1
+
+
+def test_complete_replay_mismatch_and_expiry_are_stable(database: Engine):
+    owner_id, service_id = seed(database)
+    inquiry_id = create_inquiry(database, service_id)
+    service = OwnerCommandService(database, owner_id, hmac_secret=COMMAND_SECRET, digest_key_version=3)
+    visit_id = visit(service, service_id, "complete-replay-visit")
+    client, csrf_token = client_for(database), None
+    csrf_token = login(client)
+    target = f"/api/v1/admin/inquiries/{inquiry_id}/commands"
+    assert client.post(target, headers=headers(csrf_token, "replay-confirm"), json=envelope(visit_id)).status_code == 200
+    payload = complete_envelope(visit_id)
+    first = client.post(target, headers=headers(csrf_token, "replay-complete"), json=payload)
+    replay = client.post(target, headers=headers(csrf_token, "replay-complete"), json=payload)
+    assert replay.status_code == 200 and replay.headers["idempotent-replay"] == "true" and replay.json() == first.json()
+    mismatch = client.post(target, headers=headers(csrf_token, "replay-complete"), json={**payload, "expected_version": 99})
+    assert mismatch.status_code == 409 and mismatch.json() == {"error": {"code": "IDEMPOTENCY_MISMATCH"}}
+    with database.begin() as connection:
+        connection.execute(text("UPDATE operation_receipts SET result_json=NULL, tombstoned_at=now() WHERE id=:id"), {"id": UUID(first.json()["data"]["command_id"])})
+    expired = client.post(target, headers=headers(csrf_token, "replay-complete"), json=payload)
+    assert expired.status_code == 410 and expired.json() == {"error": {"code": "RESULT_EXPIRED"}}
+
+
+@pytest.mark.parametrize("bad_payload, code", [
+    ({"type": "COMPLETE", "expected_version": 2, "expected_visit_versions": {}, "payload": {}}, "EXPECTED_VERSION_REQUIRED"),
+    ({"type": "COMPLETE", "expected_version": 1, "expected_visit_versions": {str(uuid4()): 1}, "payload": {}}, "EXPECTED_VERSION_REQUIRED"),
+    ({"type": "COMPLETE", "expected_version": 1, "expected_visit_versions": {}, "payload": {}}, "EXPECTED_VERSION_REQUIRED"),
+])
+def test_complete_invalid_version_maps_are_atomic_and_key_reusable(database: Engine, bad_payload: dict[str, object], code: str):
+    owner_id, service_id = seed(database)
+    inquiry_id = create_inquiry(database, service_id)
+    service = OwnerCommandService(database, owner_id, hmac_secret=COMMAND_SECRET, digest_key_version=3)
+    visit_id = visit(service, service_id, "complete-invalid-visit")
+    client, csrf_token = client_for(database), None
+    csrf_token = login(client)
+    target = f"/api/v1/admin/inquiries/{inquiry_id}/commands"
+    assert client.post(target, headers=headers(csrf_token, "invalid-confirm"), json=envelope(visit_id)).status_code == 200
+    response = client.post(target, headers=headers(csrf_token, "reusable-invalid"), json=bad_payload)
+    assert response.status_code == 422 and response.json() == {"error": {"code": code}}
+    valid = client.post(target, headers=headers(csrf_token, "reusable-invalid"), json=complete_envelope(visit_id))
+    assert valid.status_code == 200
+
+
 def test_start_negotiation_returns_stable_result_replay_and_audit(database: Engine):
     owner_id, service_id = seed(database)
     inquiry_id = create_inquiry(database, service_id)
@@ -197,7 +265,7 @@ def test_start_negotiation_strict_rejection_does_not_consume_key(database: Engin
         {"type": "START_NEGOTIATION", "expected_version": 1, "expected_visit_versions": {}, "payload": {}, "extra": True},
         negotiation_envelope(expected_visit_versions={str(uuid4()): 1}),
         negotiation_envelope(payload={"unexpected": True}),
-        {**negotiation_envelope(), "type": "COMPLETE"},
+        {**negotiation_envelope(), "type": "COMPLETE", "payload": {"unexpected": True}},
     ):
         rejected = client.post(target, headers=request_headers, json=malformed)
         assert rejected.status_code == 422 and rejected.json() == {"error": {"code": "VALIDATION_ERROR"}}
