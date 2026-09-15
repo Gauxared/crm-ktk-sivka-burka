@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 import shutil
+import stat
 import subprocess
 import sys
 
@@ -382,9 +383,46 @@ class Pipeline:
         require(result.returncode == 0, result.stderr.decode('utf-8', 'replace').strip())
         require(not result.stdout, 'Worktree still has changes or ignored files after cache cleanup')
         git(self.root, 'merge-base', '--is-ancestor', r['implementation_commit'], 'HEAD')
+        metadata_root = (self.root / '.git/worktrees').resolve()
+        metadata_text = git(wt, 'rev-parse', '--git-dir')
+        metadata = Path(metadata_text)
+        if not metadata.is_absolute():
+            metadata = (wt / metadata).resolve()
+        else:
+            metadata = metadata.resolve()
+        require(metadata.parent == metadata_root and metadata.name == task_id,
+                'Unexpected Git worktree metadata path')
+        self._make_tree_writable(wt, wt, 'task worktree')
+        self._make_tree_writable(metadata, metadata_root, 'Git worktree metadata')
         git(self.root, 'worktree', 'remove', str(wt))
         r['worktree'] = None
         self.event(r, 'cleaned_up', retained_branch=r['branch'])
+
+    def _make_tree_writable(self, path, boundary, label):
+        """Clear only read-only bits under one verified controller-owned tree."""
+        path = Path(path)
+        boundary = Path(boundary).resolve()
+        require(path.exists(), f'Missing {label}')
+        require(not path.is_symlink() and not path.is_junction(), f'Link/reparse {label} denied')
+        resolved = path.resolve()
+        require(resolved != self.root and resolved.is_relative_to(boundary),
+                f'{label} escapes its controller boundary')
+        entries = []
+        for folder, directories, files in os.walk(path, topdown=True, followlinks=False):
+            current = Path(folder)
+            require(not current.is_symlink() and not current.is_junction(),
+                    f'Link/reparse path denied in {label}: {current}')
+            require(current.resolve().is_relative_to(resolved), f'Path escapes {label}: {current}')
+            for name in directories + files:
+                candidate = current / name
+                require(not candidate.is_symlink() and not candidate.is_junction(),
+                        f'Link/reparse path denied in {label}: {candidate}')
+                require(candidate.resolve().is_relative_to(resolved),
+                        f'Path escapes {label}: {candidate}')
+                entries.append(candidate)
+        for candidate in reversed(entries):
+            os.chmod(candidate, candidate.stat().st_mode | stat.S_IWRITE)
+        os.chmod(path, path.stat().st_mode | stat.S_IWRITE)
 
     def handoff(self, task_id):
         r = self.get(task_id)

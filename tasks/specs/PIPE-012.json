@@ -1,0 +1,35 @@
+{
+  "id": "PIPE-012",
+  "title": "Handle OneDrive read-only directories during safe worktree removal",
+  "type": "implementation",
+  "status": "BACKLOG",
+  "priority": "high",
+  "executor": {"preferred": "cloud", "fallback": "cloud"},
+  "reviewer": "cloud",
+  "depends_on": ["PIPE-011"],
+  "allowed_paths": ["scripts/task.py", "tests/pipeline/**", "docs/git-workflow.md", "tasks/specs/PIPE-012.json"],
+  "forbidden_paths": [".env", ".env.*", "apps/**", "alembic/**", "packages/**", ".pipeline/**"],
+  "context": ["AGENTS.md", "docs/development-pipeline.md", "docs/git-workflow.md", "scripts/task.py", "scripts/policy.py", "tests/pipeline/test_pipeline.py", "tasks/specs/PIPE-011.json"],
+  "requirements": [
+    "Before git worktree remove, clear only the Windows read-only attribute throughout the exact verified task worktree and its exact Git-owned .git/worktrees/<ID> metadata directory; never touch the primary checkout tree or unrelated Git metadata.",
+    "Reject symbolic links, junctions, path escapes, unexpected metadata paths and non-DONE or dirty worktrees before attribute changes; allow ordinary OneDrive reparse attributes that are neither symlinks nor junctions.",
+    "Retain PIPE-011 whitelist cleanup, post-clean status check and implementation ancestry check, then remove the worktree and record cleanup normally.",
+    "Add cross-platform regression tests plus a Windows read-only directory scenario and document the OneDrive behavior."
+  ],
+  "acceptance": [
+    "Safe cleanup succeeds for a DONE clean worktree whose directories are read-only, without generic git clean or forced worktree removal.",
+    "Primary files and unrelated .git/worktrees metadata are unchanged, while links, wrong paths and unknown ignored files continue to fail closed.",
+    "Focused pipeline tests, whitespace validation, self-review, finish and cleanup pass."
+  ],
+  "validation": [
+    {"name": "pipeline tests", "argv": ["{python}", "-m", "pytest", "tests/pipeline", "-q"], "timeout": 120},
+    {"name": "whitespace", "argv": ["git", "diff", "--check"], "timeout": 10}
+  ],
+  "risk": "high",
+  "retry_limit": 0,
+  "shared_paths_approval": {
+    "paths": ["scripts/task.py", "tasks/specs/PIPE-012.json"],
+    "reviewer": "cloud:codex",
+    "reason": "Follow-up safety fix for the verified OneDrive read-only failure in controller-owned worktree cleanup."
+  }
+}

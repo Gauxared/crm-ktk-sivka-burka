@@ -2,6 +2,7 @@
 import json
 import os
 from pathlib import Path
+import stat
 import subprocess
 import sys
 import tempfile
@@ -529,6 +530,32 @@ class GitLifecycle(unittest.TestCase):
                     link.rmdir()
                 else:
                     link.unlink()
+
+    def test_cleanup_handles_read_only_worktree_and_metadata_without_touching_primary(self):
+        r = self.finish_for_cleanup()
+        wt = Path(r['worktree'])
+        metadata = self.root / '.git/worktrees/POC-100'
+        unrelated = self.root / '.git/worktrees/UNRELATED'
+        unrelated.mkdir()
+        marker = unrelated / 'keep.txt'
+        marker.write_text('keep')
+        primary = self.root / '.pipeline/primary-sentinel.json'
+        primary.write_text('keep primary')
+
+        for candidate in (wt / 'apps', wt, metadata, marker, unrelated, primary):
+            os.chmod(candidate, candidate.stat().st_mode & ~stat.S_IWRITE)
+
+        try:
+            self.pipeline.cleanup('POC-100')
+            self.assertFalse(wt.exists())
+            self.assertTrue(primary.exists())
+            self.assertEqual(primary.read_text(), 'keep primary')
+            self.assertTrue(marker.exists())
+            self.assertEqual(marker.read_text(), 'keep')
+        finally:
+            for candidate in (primary, marker, unrelated):
+                if candidate.exists():
+                    os.chmod(candidate, candidate.stat().st_mode | stat.S_IWRITE)
 
 
 if __name__ == '__main__':
