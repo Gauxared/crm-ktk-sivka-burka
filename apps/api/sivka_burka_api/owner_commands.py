@@ -217,6 +217,84 @@ class OwnerCommandService:
                 connection.execute(text("INSERT INTO event_visits (event_id, visit_id) VALUES (:event_id, :visit_id)"), {"event_id": event_id, "visit_id": participation["visit_id"]})
         return self._cash_note_result(result)
 
+    def correct_cash_note(self, inquiry_id: UUID | str, note_id: UUID | str, payload: Mapping[str, Any], idempotency_key: str) -> CashNoteRecorded:
+        """Correct one effective immutable manual cash note."""
+        target_inquiry_id = _uuid(str(inquiry_id))
+        target_note_id = _uuid(str(note_id))
+        normalized = self._cash_correction_payload(target_inquiry_id, target_note_id, payload)
+        path = f"/api/v1/admin/inquiries/{target_inquiry_id}/cash-notes/{target_note_id}/corrections"
+        key_digest, payload_digest = self._digests(idempotency_key, normalized)
+        with self.engine.begin() as connection:
+            connection.execute(text("SELECT id FROM business_write_guard WHERE id = 1 FOR UPDATE"))
+            replay = self._replay(connection, path, key_digest, payload_digest)
+            if replay is not None:
+                return self._cash_note_result(replay, replay=True)
+            inquiry = connection.execute(text("SELECT id, status, version FROM inquiries WHERE id=:id FOR UPDATE"), {"id": target_inquiry_id}).mappings().one_or_none()
+            if inquiry is None:
+                raise OwnerCommandError("NOT_FOUND")
+            participation = connection.execute(text("""
+                SELECT p.id, v.id AS visit_id, v.version AS visit_version
+                FROM visit_participations p JOIN visits v ON v.id=p.visit_id
+                WHERE p.inquiry_id=:id AND p.closed_at IS NULL FOR UPDATE OF p, v
+            """), {"id": target_inquiry_id}).mappings().one_or_none()
+            expected_visits = normalized["expected_visit_versions"]
+            if int(inquiry["version"]) != normalized["expected_version"]:
+                raise OwnerCommandError("VERSION_CONFLICT")
+            if participation is None:
+                if expected_visits:
+                    raise OwnerCommandError("EXPECTED_VERSION_REQUIRED")
+            else:
+                visit_id = str(participation["visit_id"])
+                if set(expected_visits) != {visit_id}:
+                    raise OwnerCommandError("EXPECTED_VERSION_REQUIRED")
+                if int(participation["visit_version"]) != expected_visits[visit_id]:
+                    raise OwnerCommandError("VERSION_CONFLICT")
+            note = connection.execute(text("""
+                SELECT id, inquiry_id FROM cash_notes
+                WHERE id=:note_id AND inquiry_id=:inquiry_id FOR UPDATE
+            """), {"note_id": target_note_id, "inquiry_id": target_inquiry_id}).mappings().one_or_none()
+            if note is None:
+                raise OwnerCommandError("NOT_FOUND")
+            if connection.execute(text("SELECT 1 FROM cash_note_corrections WHERE original_note_id=:id"), {"id": target_note_id}).scalar_one_or_none() is not None:
+                raise OwnerCommandError("CASH_NOTE_SUPERSEDED")
+            command_id, event_id, correction_id = uuid4(), uuid4(), uuid4()
+            replacement_id = None
+            now = datetime.now(timezone.utc)
+            if normalized["replacement"] is not None:
+                replacement_id = uuid4()
+                replacement = normalized["replacement"]
+                connection.execute(text("""INSERT INTO cash_notes
+                    (id, inquiry_id, kind, amount_minor, currency, occurred_at, owner_id, note)
+                    VALUES (:id, :inquiry_id, :kind, :amount_minor, 'RUB', :occurred_at, :owner_id, :note)"""), {
+                    "id": replacement_id, "inquiry_id": target_inquiry_id, "kind": replacement["kind"],
+                    "amount_minor": replacement["amount_minor"], "occurred_at": replacement["occurred_at"],
+                    "owner_id": self.owner_id, "note": replacement["note"],
+                })
+            connection.execute(text("""INSERT INTO cash_note_corrections
+                (id, inquiry_id, original_note_id, replacement_note_id, reason, owner_id)
+                VALUES (:id, :inquiry_id, :original, :replacement, :reason, :owner_id)"""), {
+                "id": correction_id, "inquiry_id": target_inquiry_id, "original": target_note_id,
+                "replacement": replacement_id, "reason": normalized["reason"], "owner_id": self.owner_id,
+            })
+            inquiry_version = int(inquiry["version"]) + 1
+            connection.execute(text("UPDATE inquiries SET version=:version WHERE id=:id"), {"id": target_inquiry_id, "version": inquiry_version})
+            changed_visits: list[dict[str, Any]] = []
+            if participation is not None:
+                visit_version = int(participation["visit_version"]) + 1
+                connection.execute(text("UPDATE visits SET version=:version WHERE id=:id"), {"id": participation["visit_id"], "version": visit_version})
+                changed_visits.append({"id": str(participation["visit_id"]), "version": visit_version})
+            detail = inquiry_detail_in_transaction(connection, target_inquiry_id)
+            if detail is None:
+                raise OwnerCommandError("NOT_FOUND")
+            result = {"command_id": str(command_id), "inquiry": detail, "changed_visits": changed_visits}
+            self._store_receipt(connection, command_id, path, key_digest, payload_digest, result, now)
+            connection.execute(text("INSERT INTO receipt_inquiries (receipt_id, inquiry_id) VALUES (:receipt_id, :inquiry_id)"), {"receipt_id": command_id, "inquiry_id": target_inquiry_id})
+            self._event(connection, event_id, command_id, "CASH_NOTE_CORRECTED", {"before": {"inquiry_id": str(target_inquiry_id), "version": inquiry["version"], "cash_note_id": str(target_note_id)}, "after": {"inquiry_id": str(target_inquiry_id), "version": inquiry_version, "correction_id": str(correction_id), "replacement_note_id": str(replacement_id) if replacement_id else None}})
+            connection.execute(text("INSERT INTO event_inquiries (event_id, inquiry_id) VALUES (:event_id, :inquiry_id)"), {"event_id": event_id, "inquiry_id": target_inquiry_id})
+            if participation is not None:
+                connection.execute(text("INSERT INTO event_visits (event_id, visit_id) VALUES (:event_id, :visit_id)"), {"event_id": event_id, "visit_id": participation["visit_id"]})
+        return self._cash_note_result(result)
+
     def confirm_inquiry(self, inquiry_id: UUID | str, payload: Mapping[str, Any], idempotency_key: str) -> InquiryConfirmed:
         target_inquiry_id = _uuid(str(inquiry_id))
         normalized = self._confirm_payload(target_inquiry_id, payload)
@@ -391,6 +469,37 @@ class OwnerCommandService:
                 "expected_visit_versions": expected_visits, "kind": kind, "amount_minor": amount_minor,
                 "occurred_at": occurred_at.astimezone(timezone.utc).isoformat(),
                 "note": _required_text(payload["note"], "note", 2000)}
+
+    @staticmethod
+    def _cash_correction_payload(inquiry_id: UUID, note_id: UUID, payload: Mapping[str, Any]) -> dict[str, Any]:
+        required = {"expected_version", "reason", "replacement"}
+        if not isinstance(payload, Mapping) or not required.issubset(payload):
+            raise OwnerCommandError("EXPECTED_VERSION_REQUIRED" if isinstance(payload, Mapping) and "expected_version" not in payload else "VALIDATION_ERROR")
+        if set(payload) not in (required, required | {"expected_visit_versions"}):
+            raise OwnerCommandError("VALIDATION_ERROR")
+        raw_versions = payload.get("expected_visit_versions", {})
+        if not isinstance(raw_versions, Mapping):
+            raise OwnerCommandError("VALIDATION_ERROR")
+        versions = {str(_uuid(k)): _positive_version(v) for k, v in raw_versions.items()}
+        replacement = payload["replacement"]
+        if replacement is not None:
+            if not isinstance(replacement, Mapping) or set(replacement) != {"kind", "amount_minor", "occurred_at", "note"}:
+                raise OwnerCommandError("VALIDATION_ERROR")
+            kind = replacement["kind"]
+            amount = replacement["amount_minor"]
+            if kind not in {"RECEIPT", "REFUND_NOTE"} or not isinstance(amount, int) or isinstance(amount, bool) or not 1 <= amount <= 9_000_000_000_000:
+                raise OwnerCommandError("VALIDATION_ERROR")
+            occurred = replacement["occurred_at"]
+            if not isinstance(occurred, str):
+                raise OwnerCommandError("VALIDATION_ERROR")
+            try:
+                occurred_at = datetime.fromisoformat(occurred.replace("Z", "+00:00"))
+            except ValueError as exc:
+                raise OwnerCommandError("VALIDATION_ERROR") from exc
+            if occurred_at.tzinfo is None or occurred_at.utcoffset() != timezone.utc.utcoffset(occurred_at):
+                raise OwnerCommandError("VALIDATION_ERROR")
+            replacement = {"kind": kind, "amount_minor": amount, "occurred_at": occurred_at.astimezone(timezone.utc).isoformat(), "note": _required_text(replacement["note"], "note", 2000)}
+        return {"inquiry_id": str(inquiry_id), "note_id": str(note_id), "expected_version": _positive_version(payload["expected_version"]), "expected_visit_versions": versions, "reason": _required_text(payload["reason"], "reason", 500), "replacement": replacement}
 
     @staticmethod
     def _confirm_payload(inquiry_id: UUID, payload: Mapping[str, Any]) -> dict[str, Any]:
