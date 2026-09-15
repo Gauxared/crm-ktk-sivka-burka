@@ -1,0 +1,34 @@
+{
+  "id": "PIPE-013",
+  "title": "Clear read-only attributes on validated cache artifacts before removal",
+  "type": "implementation",
+  "status": "BACKLOG",
+  "priority": "high",
+  "executor": {"preferred": "cloud", "fallback": "cloud"},
+  "reviewer": "cloud",
+  "depends_on": ["PIPE-012"],
+  "allowed_paths": ["scripts/task.py", "tests/pipeline/**", "docs/git-workflow.md", "tasks/specs/PIPE-013.json"],
+  "forbidden_paths": [".env", ".env.*", "apps/**", "alembic/**", "packages/**", ".pipeline/**"],
+  "context": ["AGENTS.md", "docs/development-pipeline.md", "docs/git-workflow.md", "scripts/task.py", "tests/pipeline/test_pipeline.py", "tasks/specs/PIPE-011.json", "tasks/specs/PIPE-012.json"],
+  "requirements": [
+    "After validating the complete ignored-file inventory and before deleting any cache, clear read-only attributes only inside each already approved .pytest_cache, __pycache__, .pyc or .pyo path.",
+    "Preserve all PIPE-011 and PIPE-012 fail-closed boundary, link, unknown-artifact, primary-checkout and Git metadata checks.",
+    "Add a Windows-representative regression test with a read-only ignored cache directory and file, and document the ordering guarantee."
+  ],
+  "acceptance": [
+    "Cleanup removes validated read-only cache artifacts and then removes the DONE worktree without force.",
+    "Unknown ignored artifacts still block cleanup before any approved cache or attribute is changed.",
+    "Focused pipeline tests, whitespace validation, self-review, finish and cleanup pass; the previously retained PIPE-012 and PIPE-011 worktrees can then be cleaned with the fixed controller."
+  ],
+  "validation": [
+    {"name": "pipeline tests", "argv": ["{python}", "-m", "pytest", "tests/pipeline", "-q"], "timeout": 120},
+    {"name": "whitespace", "argv": ["git", "diff", "--check"], "timeout": 10}
+  ],
+  "risk": "high",
+  "retry_limit": 0,
+  "shared_paths_approval": {
+    "paths": ["scripts/task.py", "tasks/specs/PIPE-013.json"],
+    "reviewer": "cloud:codex",
+    "reason": "Narrow recovery for the real OneDrive read-only cache failure observed while cleaning PIPE-012."
+  }
+}

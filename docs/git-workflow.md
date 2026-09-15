@@ -23,6 +23,9 @@ worktree. Any other ignored artifact, environment file, link or path escape bloc
 Before `git worktree remove`, it clears read-only bits only inside that verified worktree and its
 exact `.git/worktrees/<ID>` metadata directory. This supports OneDrive folders without forced
 removal and without changing the primary checkout or unrelated Git metadata.
+The complete ignored-file inventory is validated first. Only then are read-only bits cleared on
+approved cache artifacts so their removal cannot fail midway; an unknown artifact leaves every
+approved cache untouched.
 Never run `git clean -fdX` in the primary checkout: it contains ignored live pipeline state and
 run evidence. Use `python scripts/task.py cleanup ID` after inspecting a concrete failure.
 Crash recovery: inspect state, Git log and worktree list. Never blindly delete lock/state

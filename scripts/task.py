@@ -372,6 +372,8 @@ class Pipeline:
         for target in sorted(set(caches), key=lambda path: len(path.parts), reverse=True):
             if not target.exists():
                 continue
+            self._make_tree_writable(
+                target, wt, f'approved cache artifact {target.relative_to(wt)}')
             if target.is_dir():
                 shutil.rmtree(target)
             else:
