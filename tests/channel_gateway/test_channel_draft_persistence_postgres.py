@@ -94,6 +94,39 @@ def test_create_read_update_reset_and_replay_are_atomic(database):
         assert connection.execute(text("SELECT count(*) FROM operation_receipts")).scalar_one() == 3
 
 
+def test_read_catalog_is_public_equivalent_filtered_and_read_only(database):
+    service_id, inactive_service, fixed_id, negotiated_id, inactive_option = (uuid4() for _ in range(5))
+    with database.begin() as connection:
+        connection.execute(text("INSERT INTO club_settings (id, timezone, location_link, visit_rules) VALUES (1, 'Asia/Bangkok', 'https://example.invalid/location', 'Synthetic rules')"))
+        connection.execute(text("""INSERT INTO services (id, code, title, description, information, active, sort_order)
+            VALUES (:id, 'ride', 'Ride', 'Description', 'Information', true, 1),
+                   (:inactive, 'hidden', 'Hidden', 'Hidden', 'Hidden', false, 2)"""), {"id": service_id, "inactive": inactive_service})
+        connection.execute(text("""INSERT INTO service_options (id, service_id, code, duration_minutes, pricing_mode, price_minor, currency, active)
+            VALUES (:fixed, :service, 'fixed', 60, 'FIXED_PER_PERSON', 12500, 'RUB', true),
+                   (:negotiated, :service, 'negotiated', NULL, 'NEGOTIATED', NULL, 'RUB', true),
+                       (:hidden, :inactive, 'hidden', 1, 'FIXED_PER_PERSON', 1, 'RUB', true)"""), {"fixed": fixed_id, "negotiated": negotiated_id, "hidden": inactive_option, "service": service_id, "inactive": inactive_service})
+    before = {table: database.connect().execute(text(f"SELECT count(*) FROM {table}")).scalar_one() for table in ("contact_cards", "channel_identities", "conversation_drafts", "inquiries", "operation_receipts", "change_events", "notification_jobs")}
+    gateway = ChannelGateway(port(database))
+    telegram = gateway.read_catalog(context(Platform.TELEGRAM)).catalog
+    vk = gateway.read_catalog(context(Platform.VK)).catalog
+    assert telegram == vk
+    assert set(telegram) == {"catalog_version", "club_timezone", "contact_info", "location_link", "visit_rules", "services"}
+    assert len(telegram["services"]) == 1
+    assert {option["pricing_mode"] for option in telegram["services"][0]["options"]} == {"FIXED_PER_PERSON", "NEGOTIATED"}
+    after = {table: database.connect().execute(text(f"SELECT count(*) FROM {table}")).scalar_one() for table in before}
+    assert after == before
+
+
+def test_read_catalog_missing_state_is_typed_and_programming_errors_are_visible(database, monkeypatch):
+    gateway = ChannelGateway(port(database))
+    with pytest.raises(GatewayError) as unavailable:
+        gateway.read_catalog(context())
+    assert unavailable.value.code == "CATALOG_UNAVAILABLE"
+    monkeypatch.setattr("apps.api.sivka_burka_api.channel_draft_persistence.PublicCatalogRuntime.read", lambda self: (_ for _ in ()).throw(RuntimeError("bug")))
+    with pytest.raises(RuntimeError, match="bug"):
+        gateway.read_catalog(context(Platform.VK))
+
+
 def test_conflicts_mismatch_and_rejects_do_not_mutate(database):
     c = context(); seed_identity(database, c); gateway = ChannelGateway(port(database))
     gateway.save_draft(c, expected_version=0, answers={"name": "Nina"}, step="CONTACT", event_id="event-1")
