@@ -1,0 +1,51 @@
+{
+  "id": "CMD-003",
+  "title": "Start inquiry negotiation transactionally",
+  "type": "implementation",
+  "status": "BACKLOG",
+  "priority": "high",
+  "executor": {"preferred": "cloud", "fallback": "cloud"},
+  "reviewer": "cloud",
+  "depends_on": ["CMD-002"],
+  "allowed_paths": [
+    "apps/api/sivka_burka_api/owner_commands.py",
+    "tests/owner_commands/**",
+    "tasks/specs/CMD-003.json"
+  ],
+  "forbidden_paths": [
+    ".env", ".env.*", "alembic/**", "apps/api/sivka_burka_api/main.py",
+    "apps/api/sivka_burka_api/admin_sessions.py", "apps/api/sivka_burka_api/admin_commands.py",
+    "apps/api/sivka_burka_api/admin_inquiries.py", "apps/api/sivka_burka_api/admin_visits.py",
+    "apps/api/sivka_burka_api/inquiries.py", "apps/web/**", "docs/**", "scripts/**",
+    "pyproject.toml", "apps/bots/**", "packages/**"
+  ],
+  "context": [
+    "AGENTS.md", "docs/development-pipeline.md", "docs/api.md", "docs/booking-flow.md",
+    "apps/api/sivka_burka_api/owner_commands.py", "apps/api/sivka_burka_api/admin_inquiries.py",
+    "tests/owner_commands/test_owner_commands_postgres.py"
+  ],
+  "requirements": [
+    "Add only a transactional OwnerCommandService.start_negotiation command for the accepted START_NEGOTIATION transition. Its semantic payload is exactly expected_version and expected_visit_versions as an empty mapping; it changes NEW to NEGOTIATING and does not create, close or alter a visit participation, terms, contacts, money facts, notification jobs or any other workflow state.",
+    "Use canonical path /api/v1/admin/inquiries/{inquiry_id}/commands with a normalized payload that identifies START_NEGOTIATION. Lock business_write_guard then the target inquiry. The inquiry expected_version is required and positive. A non-empty or malformed expected_visit_versions is EXPECTED_VERSION_REQUIRED. Unknown/malformed inquiry id is NOT_FOUND. Only NEW is accepted; every other persisted status returns INVALID_TRANSITION without mutation.",
+    "On first acceptance increment only the inquiry version, write one OWNER change_event linked to the inquiry with a stable action name, write an owner receipt and receipt_inquiries link, and return the full stable result {command_id,inquiry,changed_visits:[]}. Use inquiry_detail_in_transaction before receipt storage so result semantics match the existing card. No visit version changes occur.",
+    "Preserve owner receipt semantics: HMAC idempotency digest, accepted exact replay without rereading later projection data, changed payload IDEMPOTENCY_MISMATCH, tombstoned or malformed receipt RESULT_EXPIRED, and rejected requests do not consume the key. Expose safe failures only as OwnerCommandError; no persistence schema changes or diagnostics.",
+    "Add isolated disposable PostgreSQL tests for accepted transition and exact stable replay, every invalid source status, missing/stale versions and non-empty visit map, rejection atomicity and reusable key, malformed/unknown id, receipt/event/inquiry links, unchanged visit/participation state, mismatch and expiry. Never read local .env or a configured database.",
+    "Do not add HTTP routes, other inquiry commands, participation changes, payments, checkout, webhooks, notifications, migrations, frontend, bots, secrets or external calls."
+  ],
+  "acceptance": [
+    "An owner command records the explicit NEW to NEGOTIATING transition and returns a stable full card result without modifying a calendar plan or financial history.",
+    "Versions, receipts and audit history prevent stale or duplicate negotiation transitions and partial state changes.",
+    "Focused isolated PostgreSQL tests, scope and whitespace checks pass."
+  ],
+  "validation": [
+    {"name": "CMD-003 tests", "argv": ["{python}", "-m", "pytest", "tests/owner_commands", "-q"], "timeout": 180},
+    {"name": "whitespace", "argv": ["git", "diff", "--check"], "timeout": 10}
+  ],
+  "risk": "high",
+  "retry_limit": 0,
+  "shared_paths_approval": {
+    "paths": ["apps/api/sivka_burka_api/owner_commands.py", "tests/owner_commands/**", "tasks/specs/CMD-003.json"],
+    "reviewer": "cloud:codex",
+    "reason": "Accepted narrow owner transition from NEW to NEGOTIATING with no participation, financial or HTTP change."
+  }
+}
