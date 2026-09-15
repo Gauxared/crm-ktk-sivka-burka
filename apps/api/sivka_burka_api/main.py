@@ -382,10 +382,14 @@ def create_app(*, public_submission_runtime: PublicSubmissionRuntime | None = No
             envelope = await _json_object(request)
         except InquiryCommandError:
             return _error("VALIDATION_ERROR", 422)
-        if set(envelope) != {"type", "expected_version", "expected_visit_versions", "payload"} or envelope.get("type") not in {"CONFIRM", "START_NEGOTIATION"}:
+        if envelope.get("type") == "COMPLETE" and "expected_version" not in envelope:
+            return _error("EXPECTED_VERSION_REQUIRED", 422)
+        if set(envelope) != {"type", "expected_version", "expected_visit_versions", "payload"} or envelope.get("type") not in {"CONFIRM", "START_NEGOTIATION", "COMPLETE"}:
             return _error("VALIDATION_ERROR", 422)
         command_type = envelope["type"]
         if command_type == "START_NEGOTIATION" and (envelope["expected_visit_versions"] != {} or envelope["payload"] != {}):
+            return _error("VALIDATION_ERROR", 422)
+        if command_type == "COMPLETE" and envelope["payload"] != {}:
             return _error("VALIDATION_ERROR", 422)
         idempotency_key = request.headers.get("Idempotency-Key")
         if not idempotency_key:
@@ -395,7 +399,7 @@ def create_app(*, public_submission_runtime: PublicSubmissionRuntime | None = No
         except ValueError:
             return _error("NOT_FOUND", 404)
         command_runtime, owner_id, _session = runtime
-        payload = envelope if command_type == "START_NEGOTIATION" else {
+        payload = envelope if command_type in {"START_NEGOTIATION", "COMPLETE"} else {
             "expected_version": envelope["expected_version"],
             "expected_visit_versions": envelope["expected_visit_versions"],
             "payload": envelope["payload"],
@@ -404,11 +408,14 @@ def create_app(*, public_submission_runtime: PublicSubmissionRuntime | None = No
             service = command_runtime.owner_commands(owner_id)
             if command_type == "START_NEGOTIATION":
                 result = service.start_negotiation(target_inquiry_id, payload, idempotency_key)
+            elif command_type == "COMPLETE":
+                result = service.complete_inquiry(target_inquiry_id, payload, idempotency_key)
             else:
                 result = service.confirm_inquiry(target_inquiry_id, payload, idempotency_key)
         except OwnerCommandError as error:
-            return (map_inquiry_negotiation_error(error) if command_type == "START_NEGOTIATION"
-                    else map_inquiry_confirmation_error(error))
+            if command_type == "START_NEGOTIATION":
+                return map_inquiry_negotiation_error(error)
+            return map_inquiry_confirmation_error(error)
         headers = {**_NO_STORE, **({"Idempotent-Replay": "true"} if result.replay else {})}
         return JSONResponse({"data": result.response()}, headers=headers)
 
