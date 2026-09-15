@@ -79,6 +79,18 @@ class InquiryConfirmed:
 
 
 @dataclass(frozen=True)
+class InquiryCompleted:
+    command_id: UUID
+    inquiry: Mapping[str, Any]
+    changed_visits: tuple[Mapping[str, Any], ...]
+    replay: bool = False
+
+    def response(self) -> dict[str, Any]:
+        return {"command_id": str(self.command_id), "inquiry": self.inquiry,
+                "changed_visits": [dict(v) for v in self.changed_visits]}
+
+
+@dataclass(frozen=True)
 class NegotiationStarted:
     command_id: UUID
     inquiry: Mapping[str, Any]
@@ -358,6 +370,69 @@ class OwnerCommandService:
             connection.execute(text("INSERT INTO event_visits (event_id, visit_id) VALUES (:event_id, :visit_id)"), {"event_id": event_id, "visit_id": visit_id})
         return self._confirmed_result(result)
 
+    def complete_inquiry(self, inquiry_id: UUID | str, payload: Mapping[str, Any], idempotency_key: str) -> InquiryCompleted:
+        target = _uuid(str(inquiry_id))
+        normalized = self._complete_payload(target, payload)
+        path = f"/api/v1/admin/inquiries/{target}/commands"
+        key_digest, payload_digest = self._digests(idempotency_key, normalized)
+        with self.engine.begin() as connection:
+            connection.execute(text("SELECT id FROM business_write_guard WHERE id = 1 FOR UPDATE"))
+            replay = self._replay(connection, path, key_digest, payload_digest)
+            if replay is not None:
+                return self._completed_result(replay, replay=True)
+            inquiry = connection.execute(text("SELECT id, status, version FROM inquiries WHERE id=:id FOR UPDATE"), {"id": target}).mappings().one_or_none()
+            if inquiry is None:
+                raise OwnerCommandError("NOT_FOUND")
+            if inquiry["status"] != "CONFIRMED":
+                raise OwnerCommandError("INVALID_TRANSITION")
+            parts = connection.execute(text("""SELECT p.id, p.visit_id, v.version AS visit_version,
+                    v.service_id, v.status AS visit_status, v.start_at, v.duration_minutes
+                    FROM visit_participations p JOIN visits v ON v.id=p.visit_id
+                    WHERE p.inquiry_id=:id AND p.closed_at IS NULL FOR UPDATE OF p, v"""), {"id": target}).mappings().all()
+            if len(parts) != 1:
+                raise OwnerCommandError("PARTICIPATION_CONFLICT")
+            part = parts[0]
+            terms = connection.execute(text("""SELECT service_option_id, participants_count, duration_minutes,
+                    total_minor, expected_prepayment_minor, currency, note
+                    FROM inquiry_terms WHERE inquiry_id=:id FOR UPDATE"""), {"id": target}).mappings().one_or_none()
+            if terms is None:
+                raise OwnerCommandError("NOT_FOUND")
+            visit_key = str(part["visit_id"])
+            expected = normalized["expected_visit_versions"]
+            if set(expected) != {visit_key}:
+                raise OwnerCommandError("EXPECTED_VERSION_REQUIRED")
+            if int(inquiry["version"]) != normalized["expected_version"] or int(part["visit_version"]) != expected[visit_key]:
+                raise OwnerCommandError("VERSION_CONFLICT")
+            if part["visit_status"] != "PLANNED":
+                raise OwnerCommandError("INVALID_TRANSITION")
+            now = datetime.now(timezone.utc)
+            command_id, event_id = uuid4(), uuid4()
+            inquiry_version = int(inquiry["version"]) + 1
+            visit_version = int(part["visit_version"]) + 1
+            def iso(value: Any) -> str:
+                return value.astimezone(timezone.utc).isoformat() if isinstance(value, datetime) else str(value)
+            participants_snapshot = {"participants_count": int(terms["participants_count"])}
+            plan_snapshot = {"visit": {"id": visit_key, "service_id": str(part["service_id"]),
+                "start_at": iso(part["start_at"]), "duration_minutes": part["duration_minutes"]},
+                "terms": {"service_option_id": str(terms["service_option_id"]), "participants_count": int(terms["participants_count"]),
+                    "duration_minutes": terms["duration_minutes"], "total_minor": terms["total_minor"],
+                    "expected_prepayment_minor": terms["expected_prepayment_minor"], "currency": terms["currency"], "note": terms["note"]}}
+            connection.execute(text("""UPDATE visit_participations SET closed_at=:closed_at, close_kind='PROVIDED',
+                participants_snapshot=CAST(:participants AS jsonb), plan_snapshot=CAST(:plan AS jsonb)
+                WHERE id=:id"""), {"closed_at": now, "participants": json.dumps(participants_snapshot, separators=(",", ":")), "plan": json.dumps(plan_snapshot, separators=(",", ":")), "id": part["id"]})
+            connection.execute(text("UPDATE inquiries SET status='COMPLETED', version=:version WHERE id=:id"), {"id": target, "version": inquiry_version})
+            connection.execute(text("UPDATE visits SET version=:version WHERE id=:id"), {"id": part["visit_id"], "version": visit_version})
+            detail = inquiry_detail_in_transaction(connection, target)
+            if detail is None:
+                raise OwnerCommandError("NOT_FOUND")
+            result = {"command_id": str(command_id), "inquiry": detail, "changed_visits": [{"id": visit_key, "version": visit_version}]}
+            self._store_receipt(connection, command_id, path, key_digest, payload_digest, result, now)
+            connection.execute(text("INSERT INTO receipt_inquiries (receipt_id, inquiry_id) VALUES (:receipt_id, :inquiry_id)"), {"receipt_id": command_id, "inquiry_id": target})
+            self._event(connection, event_id, command_id, "INQUIRY_COMPLETED", {"before": {"inquiry_id": str(target), "status": inquiry["status"], "version": inquiry["version"], "visit_id": visit_key, "visit_version": part["visit_version"]}, "after": {"inquiry_id": str(target), "status": "COMPLETED", "version": inquiry_version, "visit_id": visit_key, "visit_version": visit_version}})
+            connection.execute(text("INSERT INTO event_inquiries (event_id, inquiry_id) VALUES (:event_id, :inquiry_id)"), {"event_id": event_id, "inquiry_id": target})
+            connection.execute(text("INSERT INTO event_visits (event_id, visit_id) VALUES (:event_id, :visit_id)"), {"event_id": event_id, "visit_id": part["visit_id"]})
+        return self._completed_result(result)
+
     def start_negotiation(self, inquiry_id: UUID | str, payload: Mapping[str, Any], idempotency_key: str) -> NegotiationStarted:
         target_inquiry_id = _uuid(str(inquiry_id))
         normalized = self._start_negotiation_payload(target_inquiry_id, payload)
@@ -450,6 +525,22 @@ class OwnerCommandService:
             raise OwnerCommandError("RESULT_EXPIRED") from exc
         inquiry_copy = json.loads(json.dumps(inquiry, separators=(",", ":")))
         return InquiryConfirmed(command_id, inquiry_copy, (dict(changed_visits[0]),), replay)
+
+    @staticmethod
+    def _completed_result(result: Mapping[str, Any], *, replay: bool = False) -> InquiryCompleted:
+        try:
+            if set(result) != {"command_id", "inquiry", "changed_visits"} or not isinstance(result["inquiry"], Mapping) or set(result["inquiry"]) != INQUIRY_DETAIL_KEYS:
+                raise ValueError
+            command_id = UUID(str(result["command_id"]))
+            visits = result["changed_visits"]
+            if not isinstance(visits, list) or len(visits) != 1 or not isinstance(visits[0], Mapping) or set(visits[0]) != {"id", "version"}:
+                raise ValueError
+            UUID(str(result["inquiry"]["id"])); UUID(str(visits[0]["id"]))
+            if int(result["inquiry"]["version"]) <= 0 or int(visits[0]["version"]) <= 0:
+                raise ValueError
+        except (KeyError, TypeError, ValueError) as exc:
+            raise OwnerCommandError("RESULT_EXPIRED") from exc
+        return InquiryCompleted(command_id, json.loads(json.dumps(result["inquiry"], separators=(",", ":"))), (dict(visits[0]),), replay)
 
     @staticmethod
     def _negotiation_result(result: Mapping[str, Any], *, replay: bool = False) -> NegotiationStarted:
@@ -579,6 +670,19 @@ class OwnerCommandService:
         if set(normalized_versions) != {str(visit_id)}:
             raise OwnerCommandError("EXPECTED_VERSION_REQUIRED")
         return {"inquiry_id": str(inquiry_id), "expected_version": expected_version, "expected_visit_versions": normalized_versions, "payload": {"visit_id": str(visit_id)}}
+
+    @staticmethod
+    def _complete_payload(inquiry_id: UUID, payload: Mapping[str, Any]) -> dict[str, Any]:
+        required = {"type", "expected_version", "expected_visit_versions", "payload"}
+        if not isinstance(payload, Mapping) or set(payload) != required:
+            raise OwnerCommandError("EXPECTED_VERSION_REQUIRED" if not isinstance(payload, Mapping) or "expected_version" not in payload else "VALIDATION_ERROR")
+        if payload["type"] != "COMPLETE" or payload["payload"] != {}:
+            raise OwnerCommandError("VALIDATION_ERROR")
+        versions = payload["expected_visit_versions"]
+        if not isinstance(versions, Mapping):
+            raise OwnerCommandError("EXPECTED_VERSION_REQUIRED")
+        normalized = {str(_uuid(k)): _positive_version(v) for k, v in versions.items()}
+        return {"inquiry_id": str(inquiry_id), "type": "COMPLETE", "expected_version": _positive_version(payload["expected_version"]), "expected_visit_versions": normalized, "payload": {}}
 
     @staticmethod
     def _start_negotiation_payload(inquiry_id: UUID, payload: Mapping[str, Any]) -> dict[str, Any]:
