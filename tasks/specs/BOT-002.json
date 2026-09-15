@@ -1,0 +1,32 @@
+{
+  "id": "BOT-002",
+  "title": "Implement deterministic ChannelGateway core contracts",
+  "type": "implementation",
+  "status": "BACKLOG",
+  "priority": "high",
+  "executor": {"preferred": "cloud", "fallback": "cloud"},
+  "reviewer": "cloud",
+  "depends_on": ["ARCH-005", "ARCH-006", "APP-001", "DB-004", "PUBLIC-001", "PUBLIC-002", "PUBLIC-003"],
+  "allowed_paths": ["apps/api/sivka_burka_api/channel_gateway.py", "tests/channel_gateway/**", "tasks/specs/BOT-002.json"],
+  "forbidden_paths": [".env", ".env.*", "alembic/**", "apps/api/sivka_burka_api/main.py", "apps/web/**", "apps/bots/**", "packages/**", "docs/**", "config/**", "pyproject.toml"],
+  "context": ["AGENTS.md", "docs/development-pipeline.md", "docs/api.md", "docs/domain-model.md", "docs/database.md", "tasks/specs/DB-004.json", "tasks/specs/PUBLIC-001.json", "tasks/specs/PUBLIC-002.json", "tasks/specs/PUBLIC-003.json"],
+  "requirements": [
+    "Implement a pure, deterministic ChannelGateway core and typed safe contracts for TELEGRAM and VK using trusted ChannelContext with opaque integration_id, external_sender_id, conversation_id and event_id.",
+    "Expose ReadCatalog, ReadDraft, SaveDraft(expected_version, answers, step, event_id), SubmitInquiry(normalized business fields, draft_version, submit_event_id) and ResetDraft(expected_version, event_id) through ports; do not add SDKs, HTTP webhooks, persistence, logging, raw payload handling or real inquiry creation.",
+    "Reject unknown fields, malformed IDs, invalid versions and invalid transitions without mutation; user data cannot override trusted context and TELEGRAM/VK namespaces remain separate.",
+    "Keep business-flow questions unspecified where the accepted docs do not define a table of steps; enforce only safe contract and optimistic-version invariants."
+  ],
+  "acceptance": [
+    "Telegram and VK contexts have equivalent typed operation contracts while their namespaces cannot collide.",
+    "Trusted context is immutable and never sourced from user answers; strict shapes and normalized business fields reject unknown or unsafe input.",
+    "Version/event validation and rejected operations are deterministic and demonstrably side-effect free through pure tests.",
+    "No external calls, storage, raw platform payloads, PII/secrets logging, HTTP routes or submission side effects are introduced."
+  ],
+  "validation": [
+    {"name": "channel gateway tests", "argv": ["{python}", "-m", "pytest", "tests/channel_gateway", "-q"], "timeout": 120},
+    {"name": "whitespace", "argv": ["git", "diff", "--check"], "timeout": 10}
+  ],
+  "risk": "high",
+  "retry_limit": 0,
+  "shared_paths_approval": {"paths": ["apps/api/sivka_burka_api/channel_gateway.py", "tests/channel_gateway/**", "tasks/specs/BOT-002.json"], "reviewer": "cloud:codex", "reason": "Accepted internal bot contract core with no external or persistence side effects."}
+}
