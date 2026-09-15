@@ -1,0 +1,9 @@
+{
+  "id": "BOT-009",
+  "title": "Implement the shared deterministic bot conversation flow",
+  "status": "ACTIVE",
+  "implementation": "apps/api/sivka_burka_api/channel_conversation.py",
+  "tests": "tests/channel_conversation/test_channel_conversation.py",
+  "contract_source": ".pipeline/state.json",
+  "scope_note": "Platform-neutral FSM only; no transport, SDK, route, database, migration, or message delivery changes."
+}
