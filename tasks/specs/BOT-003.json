@@ -1,0 +1,49 @@
+{
+  "id": "BOT-003",
+  "title": "Persist channel drafts and inbound event deduplication",
+  "type": "implementation",
+  "status": "BACKLOG",
+  "priority": "high",
+  "executor": {"preferred": "cloud", "fallback": "cloud"},
+  "reviewer": "cloud",
+  "depends_on": ["BOT-002", "DB-004"],
+  "allowed_paths": [
+    "apps/api/sivka_burka_api/channel_gateway.py",
+    "apps/api/sivka_burka_api/channel_draft_persistence.py",
+    "tests/channel_gateway/**",
+    "tasks/specs/BOT-003.json"
+  ],
+  "forbidden_paths": [
+    ".env", ".env.*", "alembic/**", "apps/api/sivka_burka_api/main.py",
+    "apps/web/**", "apps/bots/**", "packages/**", "docs/**", "config/**", "pyproject.toml"
+  ],
+  "context": [
+    "AGENTS.md", "docs/development-pipeline.md", "docs/api.md", "docs/database.md",
+    "tasks/specs/BOT-002.json", "tasks/specs/DB-004.json",
+    "apps/api/sivka_burka_api/channel_gateway.py", "alembic/versions/20260913_04_idempotency_baseline.py"
+  ],
+  "requirements": [
+    "Implement a PostgreSQL ChannelPort adapter for ReadDraft, SaveDraft and ResetDraft over the accepted channel_identities, channel_events and conversation_drafts schema; a caller supplies or resolves an already trusted identity and the adapter never creates contacts or identities.",
+    "Use the accepted business_write_guard transaction order. Save and Reset atomically record a privacy-preserving event marker with the draft mutation; read returns no open draft after expiry, and mutation of an expired draft cannot revive its prior version.",
+    "Use positive optimistic versions: expected_version=0 creates only when no non-expired open draft exists; updates and resets require the current positive version. A stale event after change, reset, or expiry is rejected without mutation.",
+    "Deduplicate by platform plus integration plus a keyed digest of the trusted event identity. Same event plus the same normalized operation returns a stable safe result without mutation; a different normalized operation returns typed IDEMPOTENCY_MISMATCH. Persist no raw webhook payload, bot token, event ID, sender ID, conversation ID, or user answers in deduplication markers.",
+    "Do not implement SubmitInquiry, inquiry/notification-job creation, Telegram/VK SDKs, HTTP endpoints, outbound delivery, credentials, configuration, or migrations."
+  ],
+  "acceptance": [
+    "Isolated disposable PostgreSQL tests prove create/read/update/reset, optimistic conflict atomicity, duplicate replay and mismatch, TELEGRAM/VK namespace separation, expiry handling, one-open-draft invariant, and rejected inputs/events causing no mutation.",
+    "The adapter uses only trusted ChannelContext and an explicit identity resolver/input boundary; user payload cannot alter context or manufacture an identity.",
+    "Every accepted draft mutation and event marker commits together under business_write_guard, while replays are stable and old events cannot advance a newer/reset/expired dialog.",
+    "The actual diff contains no migration, raw payload/token/PII persistence in markers, SDK, HTTP route, inquiry submission, notification or frontend work."
+  ],
+  "validation": [
+    {"name": "channel draft PostgreSQL tests", "argv": ["{python}", "-m", "pytest", "tests/channel_gateway", "-q"], "timeout": 120},
+    {"name": "whitespace", "argv": ["git", "diff", "--check"], "timeout": 10}
+  ],
+  "risk": "high",
+  "retry_limit": 0,
+  "shared_paths_approval": {
+    "paths": ["apps/api/sivka_burka_api/channel_gateway.py", "apps/api/sivka_burka_api/channel_draft_persistence.py", "tests/channel_gateway/**", "tasks/specs/BOT-003.json"],
+    "reviewer": "cloud:codex",
+    "reason": "Accepted persistence adapter bound to existing bot contract and DB-004 schema, with no external transport or product submission side effects."
+  }
+}
