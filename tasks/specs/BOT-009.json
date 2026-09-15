@@ -1,9 +1,26 @@
 {
   "id": "BOT-009",
   "title": "Implement the shared deterministic bot conversation flow",
-  "status": "ACTIVE",
-  "implementation": "apps/api/sivka_burka_api/channel_conversation.py",
-  "tests": "tests/channel_conversation/test_channel_conversation.py",
-  "contract_source": ".pipeline/state.json",
-  "scope_note": "Platform-neutral FSM only; no transport, SDK, route, database, migration, or message delivery changes."
+  "type": "implementation",
+  "status": "BACKLOG",
+  "priority": "high",
+  "executor": {"preferred": "cloud", "fallback": "cloud"},
+  "reviewer": "cloud",
+  "depends_on": ["BOT-004", "BOT-005", "BOT-008"],
+  "allowed_paths": ["apps/api/sivka_burka_api/channel_conversation.py", "tests/channel_conversation/**", "tasks/specs/BOT-009.json"],
+  "forbidden_paths": [".env", ".env.*", "alembic/**", "apps/api/sivka_burka_api/main.py", "apps/api/sivka_burka_api/channel_gateway.py", "apps/api/sivka_burka_api/channel_draft_persistence.py", "apps/api/sivka_burka_api/channel_identity.py", "apps/web/**", "apps/bot/**", "packages/**", "docs/**", "config/**", "pyproject.toml"],
+  "context": ["AGENTS.md", "docs/development-pipeline.md", "docs/requirements.md", "docs/architecture.md", "docs/api.md", "docs/domain-model.md", "tasks/specs/BOT-002.json", "tasks/specs/BOT-003.json", "tasks/specs/BOT-004.json", "tasks/specs/BOT-005.json", "tasks/specs/BOT-008.json", "apps/api/sivka_burka_api/channel_gateway.py"],
+  "requirements": [
+    "Add a platform-neutral ChannelConversation application service over the existing trusted ChannelGateway. It accepts only validated ChannelContext plus one strict typed action; it does not parse Telegram/VK payloads, authenticate platforms, provision identities, access SQL directly or render SDK messages.",
+    "Implement the shared finite flow with exact mutation steps: SELECT_SERVICE stores one active catalog service_option_id and advances to REQUESTER; SET_REQUESTER stores name and optional self-reported contact and advances to DETAILS; SET_DETAILS stores participants_count, requested_time, optional experience/comment and advances to REVIEW; SUBMIT requires a complete REVIEW draft and calls SubmitInquiry with the current draft version and current event; RESET closes the current draft. OPEN reads catalog and current draft without mutation, while HELP returns public contact/rules/location data for owner handoff without inventing an answer.",
+    "Every mutating action maps to at most one gateway mutation using context.event_id. New drafts use expected_version=0; later actions use the exact current positive version. Reject unknown action/payload fields, malformed values, missing/out-of-order steps, unknown/inactive option IDs and corrupt stored drafts with typed safe errors before mutation. Preserve gateway VERSION_CONFLICT, IDEMPOTENCY_MISMATCH, RESULT_EXPIRED and availability errors.",
+    "All catalog, price, rules, location and contact information comes from ReadCatalog. Do not gate gallop, weight, age or experience automatically; do not claim that submission confirms time, admission or payment. Successful submission yields a platform-neutral accepted-unconfirmed result and keeps receipt/inquiry identifiers as trusted adapter metadata rather than public message text.",
+    "Draft answers contain only the six accepted business fields needed by SubmitInquiry and never platform, integration, sender, conversation, event, source, identity, status, price or owner fields. OPEN may resume only the accepted REQUESTER, DETAILS or REVIEW steps; any other stored step/shape returns CORRUPT_DRAFT without mutation.",
+    "Add exhaustive pure tests with a recording fake gateway for Telegram/VK equivalence, full happy flow, resume/open/help, reset, optional trusted-channel contact fallback, no automatic experience gate, strict shapes and transitions, stale/replay/error propagation, active catalog validation, exact versions/events, one mutation per action, no hidden fields and accepted-unconfirmed output. No PostgreSQL, SDK, HTTP route, external call, credential, migration or message copy is added."
+  ],
+  "acceptance": ["Telegram and VK adapters can reuse one deterministic conversation service and receive platform-neutral screens/metadata for the complete information-to-inquiry flow.", "Only a complete current REVIEW draft can create an inquiry; retries and stale actions remain governed by existing event/version semantics without duplicate mutations.", "The flow presents shared catalog/rules/location information, supports beginners and experienced clients without automatic admission decisions, and never describes an accepted inquiry as a confirmed booking.", "Focused conversation tests, scope and whitespace checks pass."],
+  "validation": [{"name": "channel conversation tests", "argv": ["{python}", "-m", "pytest", "tests/channel_conversation", "-q"], "timeout": 120}, {"name": "whitespace", "argv": ["git", "diff", "--check"], "timeout": 10}],
+  "risk": "high",
+  "retry_limit": 0,
+  "shared_paths_approval": {"paths": ["apps/api/sivka_burka_api/channel_conversation.py", "tests/channel_conversation/**", "tasks/specs/BOT-009.json"], "reviewer": "cloud:codex", "reason": "Accepted shared bot funnel over reviewed gateway operations, with platform transport and product admission decisions excluded."}
 }

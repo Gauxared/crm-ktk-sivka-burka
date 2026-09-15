@@ -1,0 +1,27 @@
+{
+  "id": "BOT-010",
+  "title": "Repair shared conversation contract and safety coverage",
+  "type": "implementation",
+  "status": "BACKLOG",
+  "priority": "high",
+  "executor": {"preferred": "cloud", "fallback": "cloud"},
+  "reviewer": "cloud",
+  "depends_on": ["BOT-009"],
+  "allowed_paths": ["apps/api/sivka_burka_api/channel_conversation.py", "tests/channel_conversation/**", "tasks/specs/BOT-009.json", "tasks/specs/BOT-010.json"],
+  "forbidden_paths": [".env", ".env.*", "alembic/**", "apps/api/sivka_burka_api/main.py", "apps/api/sivka_burka_api/channel_gateway.py", "apps/api/sivka_burka_api/channel_draft_persistence.py", "apps/api/sivka_burka_api/channel_identity.py", "apps/web/**", "apps/bot/**", "packages/**", "docs/**", "config/**", "pyproject.toml"],
+  "context": ["AGENTS.md", "docs/development-pipeline.md", ".pipeline/state.json", "tasks/specs/BOT-009.json", "apps/api/sivka_burka_api/channel_conversation.py", "apps/api/sivka_burka_api/channel_gateway.py", "tests/channel_conversation/test_channel_conversation.py"],
+  "requirements": [
+    "Restore tasks/specs/BOT-009.json to the complete accepted BOT-009 task contract stored in pipeline state; do not leave a short pointer/status stub. Materialize the complete BOT-010 contract as tasks/specs/BOT-010.json.",
+    "Remove hard-coded human message copy from the conversation core. Public serialization must never include receipt_id or inquiry_id; keep those identifiers only in explicit trusted adapter metadata. Return a stable accepted-unconfirmed semantic code/screen that an adapter can render without implying confirmed time, admission or payment.",
+    "Validate ChannelContext at the conversation boundary before calling even a duck-typed gateway. Every action must enforce exact required and optional keys before indexing so malformed or missing payload data returns a typed GatewayError rather than KeyError, TypeError, AssertionError or another implementation exception.",
+    "When SET_REQUESTER has no self-reported contact, persist requester with name only and let the reviewed submit port derive the trusted current platform/sender contact. Never copy external_sender_id, platform, integration, conversation or event into draft answers. Preserve a supplied strict PHONE/TELEGRAM/VK contact only as self-reported contact.",
+    "Treat stored drafts as untrusted persistence input: validate exact allowed keys for each step, nested requester/contact and requested_time shapes, normalized values and the selected option against the current active catalog. Unknown step, extra/out-of-order fields, malformed nested values or inactive option returns CORRUPT_DRAFT or UNKNOWN_SERVICE_OPTION without mutation.",
+    "Preserve the original GatewayError object/code for VERSION_CONFLICT, IDEMPOTENCY_MISMATCH, RESULT_EXPIRED and availability errors. Ensure each mutating action invokes at most one gateway mutation and every rejection invokes none.",
+    "Replace the three broad happy-path tests with focused exhaustive pure coverage for Telegram/VK equivalence, OPEN/HANDOFF data, every transition and exact version/event, reset, contact omission/supply, beginner and experienced paths without gates, public serialization privacy, malformed/missing/extra actions, every corrupt draft step/shape, inactive options at selection/resume/submit, stable replay metadata, gateway error identity propagation, one mutation per success and zero on rejection."
+  ],
+  "acceptance": ["The shared conversation service has no hard-coded channel message copy and its public serialization cannot expose internal receipt or inquiry IDs.", "Malformed actions and corrupt persisted drafts always fail with typed safe errors before mutation; trusted sender identifiers are never copied into draft answers.", "Focused tests prove every BOT-009 contract branch, exact versions/events, error propagation and mutation count rather than only the happy path.", "Focused conversation tests, scope and whitespace checks pass."],
+  "validation": [{"name": "channel conversation tests", "argv": ["{python}", "-m", "pytest", "tests/channel_conversation", "-q"], "timeout": 120}, {"name": "whitespace", "argv": ["git", "diff", "--check"], "timeout": 10}],
+  "risk": "high",
+  "retry_limit": 0,
+  "shared_paths_approval": {"paths": ["apps/api/sivka_burka_api/channel_conversation.py", "tests/channel_conversation/**", "tasks/specs/BOT-009.json", "tasks/specs/BOT-010.json"], "reviewer": "cloud:codex", "reason": "Required repair of privacy, strict validation and missing evidence before BOT-009 can be published."}
+}
