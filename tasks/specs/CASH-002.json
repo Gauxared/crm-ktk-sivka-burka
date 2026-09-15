@@ -1,0 +1,54 @@
+{
+  "id": "CASH-002",
+  "title": "Correct an immutable manual cash note transactionally",
+  "type": "implementation",
+  "status": "BACKLOG",
+  "priority": "high",
+  "executor": {"preferred": "cloud", "fallback": "cloud"},
+  "reviewer": "cloud",
+  "depends_on": ["CASH-001", "CMD-002"],
+  "allowed_paths": [
+    "apps/api/sivka_burka_api/owner_commands.py",
+    "tests/owner_commands/**",
+    "tasks/specs/CASH-002.json"
+  ],
+  "forbidden_paths": [
+    ".env", ".env.*", "alembic/**", "apps/api/sivka_burka_api/main.py",
+    "apps/api/sivka_burka_api/admin_sessions.py", "apps/api/sivka_burka_api/admin_commands.py",
+    "apps/api/sivka_burka_api/admin_inquiries.py", "apps/api/sivka_burka_api/admin_visits.py",
+    "apps/api/sivka_burka_api/inquiries.py", "apps/api/sivka_burka_api/public_submission.py",
+    "apps/api/sivka_burka_api/public_catalog.py", "apps/web/**", "docs/**", "scripts/**",
+    "pyproject.toml", "apps/bots/**", "packages/**"
+  ],
+  "context": [
+    "AGENTS.md", "docs/development-pipeline.md", "docs/api.md", "docs/database.md",
+    "docs/booking-flow.md", "apps/api/sivka_burka_api/owner_commands.py",
+    "apps/api/sivka_burka_api/admin_inquiries.py", "tests/owner_commands/test_owner_commands_postgres.py",
+    "tests/db007/test_cash_notes.py"
+  ],
+  "requirements": [
+    "Add only a transactional OwnerCommandService.correct_cash_note owner command for the accepted semantic payload: expected_version, optional expected_visit_versions, reason, and replacement null or {kind RECEIPT|REFUND_NOTE, positive integer amount_minor, UTC occurred_at, non-empty note}. It corrects one immutable manual fact only; it does not send money, infer a payment, calculate a refund, alter agreed terms, or change inquiry or visit workflow status.",
+    "Use canonical path /api/v1/admin/inquiries/{inquiry_id}/cash-notes/{note_id}/corrections. Lock business_write_guard, then the target inquiry and its active participation or visit, then the original cash note. The inquiry expected_version is always required. If an active participation exists, expected_visit_versions must contain exactly that visit and its current positive version; without active participation it may be omitted or empty. The command remains permitted for every persisted inquiry status, including COMPLETED and CANCELLED.",
+    "Reject a malformed UUID or a note outside the target inquiry as NOT_FOUND. Correct only an effective original note: a different accepted key after an existing correction returns CASH_NOTE_SUPERSEDED. Null replacement marks the original non-effective; a replacement atomically appends exactly one new immutable RUB cash note. Preserve the original unchanged, use trusted owner_id and server timestamps, and rely on existing persistence constraints without a new migration.",
+    "On first acceptance create one cash_note_corrections record, increment the inquiry version and current visit version when present, create one OWNER change_event and receipt links for the inquiry and current visit. Store and return the complete stable result {command_id,inquiry,changed_visits}; snapshot it in operation_receipts.result_json and replay it without rereading later cash facts. The resulting inquiry detail must reflect the effective-note cash summary.",
+    "Preserve receipt semantics: owner scope, HMAC digests, identical replay without duplicate correction, note, event or version changes; changed payload is IDEMPOTENCY_MISMATCH; tombstoned or malformed result is RESULT_EXPIRED; rejected requests never consume the key. Safe domain failures use typed OwnerCommandError only; do not expose diagnostics or add persistence schema.",
+    "Add isolated disposable PostgreSQL tests for null and replacement correction effects, immutable original history, correcting a non-effective original, cross-inquiry note isolation, every inquiry state, active and unplanned version behaviour, atomic stale conflicts, stable replay after later data changes, expired or mismatched receipts, correction and audit links, and status invariance. Never read local .env or a configured database.",
+    "Do not add HTTP routes, payment integration, checkout, webhooks, invoices, notifications, production composition, frontend assets, bot adapters, migrations, secrets or external calls."
+  ],
+  "acceptance": [
+    "An owner command can correct an erroneous factual receipt or refund note while preserving the original record and without blocking confirmed, completed or cancelled inquiries.",
+    "Version, receipt and audit rules prevent partial corrections, duplicate replacement facts and stale changes; returned cash summaries reflect only effective notes.",
+    "Focused isolated PostgreSQL tests, scope and whitespace checks pass."
+  ],
+  "validation": [
+    {"name": "CASH-002 tests", "argv": ["{python}", "-m", "pytest", "tests/owner_commands", "-q"], "timeout": 180},
+    {"name": "whitespace", "argv": ["git", "diff", "--check"], "timeout": 10}
+  ],
+  "risk": "high",
+  "retry_limit": 0,
+  "shared_paths_approval": {
+    "paths": ["apps/api/sivka_burka_api/owner_commands.py", "tests/owner_commands/**", "tasks/specs/CASH-002.json"],
+    "reviewer": "cloud:codex",
+    "reason": "Accepted append-only correction command over the existing cash-note schema; it adds neither payment execution nor an HTTP surface."
+  }
+}
