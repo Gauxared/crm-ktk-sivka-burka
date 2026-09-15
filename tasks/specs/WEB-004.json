@@ -1,0 +1,40 @@
+{
+  "id": "WEB-004",
+  "title": "Build owner visit calendar and group detail",
+  "type": "implementation",
+  "status": "BACKLOG",
+  "priority": "high",
+  "executor": {"preferred": "cloud", "fallback": "cloud"},
+  "reviewer": "cloud",
+  "depends_on": ["WEB-003", "CAL-001", "PUBLIC-002"],
+  "allowed_paths": ["apps/web/owner/**", "tests/web004/**", "tasks/specs/WEB-004.json"],
+  "forbidden_paths": [".env", ".env.*", "apps/api/**", "apps/web/index.html", "apps/web/script.js", "apps/web/style.css", "apps/bots/**", "packages/**", "package.json", "package-lock.json", "node_modules/**", "docs/**", "scripts/**"],
+  "context": ["AGENTS.md", "docs/development-pipeline.md", "docs/requirements.md", "docs/api.md", "tasks/specs/WEB-003.json", "tasks/specs/CAL-001.json", "apps/web/owner/app.js", "apps/web/owner/index.html", "apps/web/owner/style.css", "tests/web002a", "tests/web003"],
+  "requirements": [
+    "Turn the existing owner navigation into hash-based inquiries/calendar views without weakening session bootstrap, runtime-only CSRF, credentials include, logout, inquiry filters, pagination or detail behavior.",
+    "For the calendar, load club_timezone from GET /api/v1/public/catalog and never substitute the developer computer timezone. If a valid IANA timezone cannot be obtained, show a safe explicit unavailable state instead of querying an invented interval.",
+    "Render a responsive Russian month calendar with previous, next and current-month controls. Form UTC from-inclusive/to-exclusive month bounds from the club timezone, request GET /api/v1/admin/visits with limit 100, follow every opaque next_cursor page for the same interval and preserve server ordering.",
+    "Show every returned visit in its club-local day cell without a hidden per-day limit. Each card exposes only accepted VisitSummary fields and clearly marks unresolved inquiries; loading, empty, range, authorization, server and network states must be safe and accessible.",
+    "Open GET /api/v1/admin/visits/{id} from a calendar card and render the accepted plan plus every current participation with requester name, inquiry status, participants and cash summary. Return to the same month; do not add write commands or infer missing end times, money or eligibility.",
+    "Add dependency-free structural tests under tests/web004 and run the existing owner session/inquiry contract tests. Do not add backend changes, external libraries, tracking, credentials, hosting or network tests."
+  ],
+  "acceptance": [
+    "The owner can switch between inquiries and a large-cell monthly calendar, navigate months, see all visits including busy days and open a group detail without losing the selected month.",
+    "Calendar API intervals use the configured club timezone and all cursor pages; missing timezone and API failures remain explicit rather than showing misleading empty data.",
+    "WEB-002A, WEB-003 and WEB-004 offline tests, JavaScript syntax, scope and whitespace checks pass."
+  ],
+  "validation": [
+    {"name": "owner session tests", "argv": ["{python}", "-m", "unittest", "discover", "-s", "tests/web002a", "-v"], "timeout": 60},
+    {"name": "owner inquiry tests", "argv": ["{python}", "-m", "unittest", "discover", "-s", "tests/web003", "-v"], "timeout": 60},
+    {"name": "owner calendar tests", "argv": ["{python}", "-m", "unittest", "discover", "-s", "tests/web004", "-v"], "timeout": 60},
+    {"name": "JavaScript syntax", "argv": ["node", "--check", "apps/web/owner/app.js"], "timeout": 30},
+    {"name": "whitespace", "argv": ["git", "diff", "--check"], "timeout": 10}
+  ],
+  "risk": "medium",
+  "retry_limit": 0,
+  "shared_paths_approval": {
+    "paths": ["apps/web/owner/**", "tests/web004/**", "tasks/specs/WEB-004.json"],
+    "reviewer": "cloud:codex",
+    "reason": "Accepted read-only owner calendar UI over the existing authenticated visit and public timezone contracts."
+  }
+}
