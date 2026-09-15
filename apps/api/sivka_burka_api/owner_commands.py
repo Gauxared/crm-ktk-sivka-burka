@@ -78,6 +78,18 @@ class InquiryConfirmed:
         return int(self.changed_visits[0]["version"])
 
 
+@dataclass(frozen=True)
+class NegotiationStarted:
+    command_id: UUID
+    inquiry: Mapping[str, Any]
+    changed_visits: tuple[Mapping[str, Any], ...] = ()
+    replay: bool = False
+
+    def response(self) -> dict[str, Any]:
+        return {"command_id": str(self.command_id), "inquiry": self.inquiry,
+                "changed_visits": [dict(visit) for visit in self.changed_visits]}
+
+
 def _required_text(value: Any, field: str, maximum: int = 500) -> str:
     if not isinstance(value, str) or not value.strip() or len(value) > maximum:
         raise OwnerCommandError("VALIDATION_ERROR")
@@ -346,6 +358,37 @@ class OwnerCommandService:
             connection.execute(text("INSERT INTO event_visits (event_id, visit_id) VALUES (:event_id, :visit_id)"), {"event_id": event_id, "visit_id": visit_id})
         return self._confirmed_result(result)
 
+    def start_negotiation(self, inquiry_id: UUID | str, payload: Mapping[str, Any], idempotency_key: str) -> NegotiationStarted:
+        target_inquiry_id = _uuid(str(inquiry_id))
+        normalized = self._start_negotiation_payload(target_inquiry_id, payload)
+        path = f"/api/v1/admin/inquiries/{target_inquiry_id}/commands"
+        key_digest, payload_digest = self._digests(idempotency_key, normalized)
+        with self.engine.begin() as connection:
+            connection.execute(text("SELECT id FROM business_write_guard WHERE id = 1 FOR UPDATE"))
+            replay = self._replay(connection, path, key_digest, payload_digest)
+            if replay is not None:
+                return self._negotiation_result(replay, replay=True)
+            inquiry = connection.execute(text("SELECT id, status, version FROM inquiries WHERE id=:id FOR UPDATE"), {"id": target_inquiry_id}).mappings().one_or_none()
+            if inquiry is None:
+                raise OwnerCommandError("NOT_FOUND")
+            if inquiry["status"] != "NEW":
+                raise OwnerCommandError("INVALID_TRANSITION")
+            if int(inquiry["version"]) != normalized["expected_version"]:
+                raise OwnerCommandError("VERSION_CONFLICT")
+            command_id, event_id = uuid4(), uuid4()
+            now = datetime.now(timezone.utc)
+            inquiry_version = int(inquiry["version"]) + 1
+            connection.execute(text("UPDATE inquiries SET status='NEGOTIATING', version=:version WHERE id=:id"), {"id": target_inquiry_id, "version": inquiry_version})
+            detail = inquiry_detail_in_transaction(connection, target_inquiry_id)
+            if detail is None:
+                raise OwnerCommandError("NOT_FOUND")
+            result = {"command_id": str(command_id), "inquiry": detail, "changed_visits": []}
+            self._store_receipt(connection, command_id, path, key_digest, payload_digest, result, now)
+            connection.execute(text("INSERT INTO receipt_inquiries (receipt_id, inquiry_id) VALUES (:receipt_id, :inquiry_id)"), {"receipt_id": command_id, "inquiry_id": target_inquiry_id})
+            self._event(connection, event_id, command_id, "INQUIRY_NEGOTIATION_STARTED", {"before": {"inquiry_id": str(target_inquiry_id), "status": inquiry["status"], "version": inquiry["version"]}, "after": {"inquiry_id": str(target_inquiry_id), "status": "NEGOTIATING", "version": inquiry_version}})
+            connection.execute(text("INSERT INTO event_inquiries (event_id, inquiry_id) VALUES (:event_id, :inquiry_id)"), {"event_id": event_id, "inquiry_id": target_inquiry_id})
+        return self._negotiation_result(result)
+
     def _digests(self, idempotency_key: str, payload: Mapping[str, Any]) -> tuple[bytes, bytes]:
         return _digest(self.hmac_secret, _required_text(idempotency_key, "Idempotency-Key")), _payload_digest(self.hmac_secret, payload)
 
@@ -407,6 +450,20 @@ class OwnerCommandService:
             raise OwnerCommandError("RESULT_EXPIRED") from exc
         inquiry_copy = json.loads(json.dumps(inquiry, separators=(",", ":")))
         return InquiryConfirmed(command_id, inquiry_copy, (dict(changed_visits[0]),), replay)
+
+    @staticmethod
+    def _negotiation_result(result: Mapping[str, Any], *, replay: bool = False) -> NegotiationStarted:
+        try:
+            if set(result) != {"command_id", "inquiry", "changed_visits"} or not isinstance(result["inquiry"], Mapping) or set(result["inquiry"]) != INQUIRY_DETAIL_KEYS:
+                raise ValueError
+            command_id = UUID(str(result["command_id"]))
+            if not isinstance(result["changed_visits"], list) or result["changed_visits"]:
+                raise ValueError
+            int(result["inquiry"]["version"])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise OwnerCommandError("RESULT_EXPIRED") from exc
+        inquiry_copy = json.loads(json.dumps(result["inquiry"], separators=(",", ":")))
+        return NegotiationStarted(command_id, inquiry_copy, (), replay)
 
     def _store_receipt(self, connection: Any, command_id: UUID, path: str, key_digest: bytes, payload_digest: bytes, result: Mapping[str, Any], now: datetime) -> None:
         connection.execute(text("""INSERT INTO operation_receipts
@@ -522,3 +579,17 @@ class OwnerCommandService:
         if set(normalized_versions) != {str(visit_id)}:
             raise OwnerCommandError("EXPECTED_VERSION_REQUIRED")
         return {"inquiry_id": str(inquiry_id), "expected_version": expected_version, "expected_visit_versions": normalized_versions, "payload": {"visit_id": str(visit_id)}}
+
+    @staticmethod
+    def _start_negotiation_payload(inquiry_id: UUID, payload: Mapping[str, Any]) -> dict[str, Any]:
+        required = {"type", "expected_version", "expected_visit_versions", "payload"}
+        if not isinstance(payload, Mapping) or set(payload) != required:
+            raise OwnerCommandError("EXPECTED_VERSION_REQUIRED" if not isinstance(payload, Mapping) or "expected_version" not in payload else "VALIDATION_ERROR")
+        if payload["type"] != "START_NEGOTIATION" or payload["payload"] != {}:
+            raise OwnerCommandError("VALIDATION_ERROR")
+        versions = payload["expected_visit_versions"]
+        if not isinstance(versions, Mapping):
+            raise OwnerCommandError("EXPECTED_VERSION_REQUIRED")
+        if versions:
+            raise OwnerCommandError("EXPECTED_VERSION_REQUIRED")
+        return {"inquiry_id": str(inquiry_id), "type": "START_NEGOTIATION", "expected_version": _positive_version(payload["expected_version"]), "expected_visit_versions": {}}
