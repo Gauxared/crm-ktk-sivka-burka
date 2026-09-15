@@ -117,6 +117,13 @@ def create_and_confirm(service: OwnerCommandService, inquiry_id: UUID, service_i
     return visit_id
 
 
+def correction_payload(note_id: UUID, *, expected_version: int = 2, replacement: dict[str, object] | None = None, reason: str = "Factual correction", visit_versions: dict[str, int] | None = None) -> dict[str, object]:
+    result: dict[str, object] = {"expected_version": expected_version, "reason": reason, "replacement": replacement}
+    if visit_versions is not None:
+        result["expected_visit_versions"] = visit_versions
+    return result
+
+
 def test_cash_note_requires_owner_browser_boundary_and_strict_body(database: Engine):
     _, service_id = seed(database)
     inquiry_id = create_inquiry(database, service_id)
@@ -143,7 +150,7 @@ def test_cash_note_requires_owner_browser_boundary_and_strict_body(database: Eng
     assert malformed_json.status_code == 422 and malformed_json.json() == {"error": {"code": "VALIDATION_ERROR"}}
     invalid_amount = client.post(target, headers={**valid_headers, "Idempotency-Key": "bad-amount"}, json=payload(amount=0))
     assert invalid_amount.status_code == 422 and invalid_amount.json() == {"error": {"code": "VALIDATION_ERROR"}}
-    with database.connect() as connection:
+    with database.begin() as connection:
         assert connection.execute(text("SELECT count(*) FROM cash_notes")).scalar_one() == 0
         assert connection.execute(text("SELECT count(*) FROM operation_receipts WHERE canonical_path=:path"), {"path": target}).scalar_one() == 0
 
@@ -207,3 +214,85 @@ def test_refund_enforces_planned_versions_and_preserves_confirmed_status(databas
         assert connection.execute(text("SELECT status, version FROM inquiries WHERE id=:id"), {"id": planned_id}).one() == ("CONFIRMED", 3)
         assert connection.execute(text("SELECT version FROM visits WHERE id=:id"), {"id": visit_id}).scalar_one() == 3
         assert connection.execute(text("SELECT count(*) FROM cash_notes WHERE inquiry_id=:id"), {"id": planned_id}).scalar_one() == 1
+
+
+def test_cash_note_correction_browser_boundary_strict_uuid_and_key_reuse(database: Engine):
+    _, service_id = seed(database)
+    inquiry_id = create_inquiry(database, service_id)
+    client = client_for(database)
+    target = f"/api/v1/admin/inquiries/{inquiry_id}/cash-notes"
+    csrf_token = login(client)
+    recorded = client.post(target, headers=headers(csrf_token, "correction-source"), json=payload())
+    note_id = UUID(recorded.json()["data"]["inquiry"]["cash_notes"][0]["id"])
+    correction_target = f"{target}/{note_id}/corrections"
+    body = correction_payload(note_id)
+    assert client_for(database).post(correction_target, headers={"Origin": ORIGIN, "Content-Type": "application/json", "Idempotency-Key": "missing-auth"}, json=body).status_code == 401
+    assert client.post(correction_target, headers={**headers(csrf_token, "bad-origin"), "Origin": "https://untrusted.invalid"}, json=body).status_code == 403
+    assert client.post(correction_target, headers={**headers("wrong", "bad-csrf")}, json=body).status_code == 403
+    assert client.post(correction_target, headers={**headers(csrf_token, "bad-media"), "Content-Type": "text/plain"}, content="{}").status_code == 415
+    assert client.post(correction_target, headers=headers(csrf_token, "strict"), json={**body, "extra": True}).status_code == 422
+    assert client.post(correction_target, headers={**headers(csrf_token, "strict")}, json=body).status_code == 200
+    malformed = client.post(f"{target}/not-a-uuid/corrections", headers=headers(csrf_token, "malformed"), json=body)
+    assert malformed.status_code == 404 and malformed.json() == {"error": {"code": "NOT_FOUND"}}
+
+
+def test_cash_note_correction_null_replacement_replay_superseded_and_audit(database: Engine):
+    owner_id, service_id = seed(database)
+    inquiry_id = create_inquiry(database, service_id)
+    client = client_for(database)
+    csrf_token = login(client)
+    source = f"/api/v1/admin/inquiries/{inquiry_id}/cash-notes"
+    recorded = client.post(source, headers=headers(csrf_token, "source"), json=payload())
+    data = recorded.json()["data"]
+    note_id = UUID(data["inquiry"]["cash_notes"][0]["id"])
+    target = f"{source}/{note_id}/corrections"
+    request_headers = headers(csrf_token, "correction")
+    body = correction_payload(note_id)
+    too_long = client.post(target, headers=headers(csrf_token, "too-long"), json=correction_payload(note_id, reason="x" * 501))
+    assert too_long.status_code == 422
+    first = client.post(target, headers=request_headers, json=body)
+    assert first.status_code == 200 and first.headers["cache-control"] == "no-store"
+    first_data = first.json()["data"]
+    assert first_data["inquiry"]["version"] == 3 and first_data["inquiry"]["status"] == "NEW"
+    assert first_data["inquiry"]["cash_notes"][0]["effective"] is False
+    assert first_data["inquiry"]["cash_notes"][0]["correction"]["replacement_note_id"] is None
+    with database.begin() as connection:
+        connection.execute(text("UPDATE inquiries SET requester_name='Projection mutation' WHERE id=:id"), {"id": inquiry_id})
+    replay = client.post(target, headers=request_headers, json=body)
+    assert replay.status_code == 200 and replay.headers["idempotent-replay"] == "true" and replay.json() == first.json()
+    mismatch = client.post(target, headers=request_headers, json=correction_payload(note_id, reason="different"))
+    assert mismatch.status_code == 409 and mismatch.json() == {"error": {"code": "IDEMPOTENCY_MISMATCH"}}
+    superseded = client.post(target, headers=headers(csrf_token, "second-correction"), json=correction_payload(note_id, expected_version=3))
+    assert superseded.status_code == 409 and superseded.json() == {"error": {"code": "CASH_NOTE_SUPERSEDED"}}
+    foreign = client.post(f"{source}/{uuid4()}/corrections", headers=headers(csrf_token, "foreign"), json=correction_payload(note_id, expected_version=3))
+    assert foreign.status_code == 404 and foreign.json() == {"error": {"code": "NOT_FOUND"}}
+    with database.begin() as connection:
+        assert connection.execute(text("SELECT count(*) FROM change_events WHERE command_id=:id AND action='CASH_NOTE_CORRECTED'"), {"id": UUID(first_data["command_id"])}).scalar_one() == 1
+        assert connection.execute(text("SELECT count(*) FROM cash_note_corrections WHERE original_note_id=:id"), {"id": note_id}).scalar_one() == 1
+        connection.execute(text("UPDATE operation_receipts SET result_json=NULL, tombstoned_at=now() WHERE id=:id"), {"id": UUID(first_data["command_id"])})
+    expired = client.post(target, headers=request_headers, json=body)
+    assert expired.status_code == 410 and expired.json() == {"error": {"code": "RESULT_EXPIRED"}}
+
+
+def test_cash_note_correction_replacement_and_planned_versions(database: Engine):
+    owner_id, service_id = seed(database)
+    inquiry_id = create_inquiry(database, service_id)
+    service = OwnerCommandService(database, owner_id, hmac_secret=COMMAND_SECRET, digest_key_version=3)
+    visit_id = create_and_confirm(service, inquiry_id, service_id)
+    client = client_for(database)
+    csrf_token = login(client)
+    source = f"/api/v1/admin/inquiries/{inquiry_id}/cash-notes"
+    recorded = client.post(source, headers=headers(csrf_token, "planned-source"), json=payload(inquiry_version=2, visit_versions={str(visit_id): 2}))
+    note_id = UUID(recorded.json()["data"]["inquiry"]["cash_notes"][0]["id"])
+    target = f"{source}/{note_id}/corrections"
+    replacement = {"kind": "REFUND_NOTE", "amount_minor": 111_000, "occurred_at": "2026-10-02T08:00:00Z", "note": "Replacement fact"}
+    stale = client.post(target, headers=headers(csrf_token, "planned-stale"), json=correction_payload(note_id, expected_version=2, replacement=replacement, visit_versions={str(visit_id): 2}))
+    assert stale.status_code == 409 and stale.json() == {"error": {"code": "VERSION_CONFLICT"}}
+    valid = client.post(target, headers=headers(csrf_token, "planned-valid"), json=correction_payload(note_id, expected_version=3, replacement=replacement, visit_versions={str(visit_id): 3}))
+    assert valid.status_code == 200
+    notes = valid.json()["data"]["inquiry"]["cash_notes"]
+    assert any(note["kind"] == "REFUND_NOTE" and note["amount_minor"] == 111_000 for note in notes)
+    assert valid.json()["data"]["changed_visits"] == [{"id": str(visit_id), "version": 4}]
+    with database.connect() as connection:
+        assert connection.execute(text("SELECT status, version FROM inquiries WHERE id=:id"), {"id": inquiry_id}).one() == ("CONFIRMED", 4)
+        assert connection.execute(text("SELECT version FROM visits WHERE id=:id"), {"id": visit_id}).scalar_one() == 4
