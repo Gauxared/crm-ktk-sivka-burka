@@ -1,0 +1,12 @@
+{
+  "id":"WEB-003","title":"Build owner inquiry list and detail","type":"implementation","status":"BACKLOG","priority":"high",
+  "executor":{"preferred":"cloud","fallback":"cloud"},"reviewer":"cloud",
+  "depends_on":["WEB-002","ADMIN-001"],
+  "allowed_paths":["apps/web/owner/**","tests/web003/**","tasks/specs/WEB-003.json"],
+  "forbidden_paths":[".env",".env.*","apps/api/**","apps/web/index.html","apps/web/script.js","apps/web/style.css","apps/bots/**","packages/**","package.json","package-lock.json","node_modules/**","docs/**","scripts/**"],
+  "context":["AGENTS.md","docs/development-pipeline.md","docs/api.md","tasks/specs/WEB-002A.json","tasks/specs/ADMIN-001.json","AUTH-001.json","apps/web/owner/app.js","apps/web/owner/index.html","apps/web/owner/style.css","tests/web002a"],
+  "requirements":["After session bootstrap, render GET /api/v1/admin/inquiries with status, has_visit, channel, opaque cursor and limit filters; reset cursor on filter changes and preserve server ordering.","Render loading, empty, safe error and API summary states; open GET /api/v1/admin/inquiries/{id} and show only accepted detail fields, handling optional visit fields.","Return 401 through common login flow; show safe messages for 403/404/5xx/network; never log payload or PII. Preserve runtime CSRF, credentials include and logout. Calendar and mutations remain placeholders.","Provide responsive mobile cards/desktop layout, keyboard focus, labels and live regions; add dependency-free contract tests under tests/web003."],
+  "acceptance":["Owner can browse filtered inquiry summaries, paginate with opaque next_cursor and open/close detail while filters persist.","Detail exposes only contract-approved contact, time, service/terms, participation/visit, cash, notes and notification summary fields.","Focused tests cover query/cursor reset, states, errors, 401, navigation preservation and no PII logging; scope and whitespace pass."],
+  "validation":[{"name":"WEB-003 tests","argv":["{python}","-m","unittest","discover","-s","tests/web003","-v"],"timeout":60},{"name":"whitespace","argv":["git","diff","--check"],"timeout":10}],
+  "risk":"high","retry_limit":0
+}
