@@ -95,7 +95,7 @@ def test_create_read_update_reset_and_replay_are_atomic(database):
 
 
 def test_read_catalog_is_public_equivalent_filtered_and_read_only(database):
-    service_id, inactive_service, fixed_id, negotiated_id, inactive_option = (uuid4() for _ in range(5))
+    service_id, inactive_service, fixed_id, negotiated_id, inactive_option, inactive_service_option = (uuid4() for _ in range(6))
     with database.begin() as connection:
         connection.execute(text("INSERT INTO club_settings (id, timezone, location_link, visit_rules) VALUES (1, 'Asia/Bangkok', 'https://example.invalid/location', 'Synthetic rules')"))
         connection.execute(text("""INSERT INTO services (id, code, title, description, information, active, sort_order)
@@ -104,16 +104,23 @@ def test_read_catalog_is_public_equivalent_filtered_and_read_only(database):
         connection.execute(text("""INSERT INTO service_options (id, service_id, code, duration_minutes, pricing_mode, price_minor, currency, active)
             VALUES (:fixed, :service, 'fixed', 60, 'FIXED_PER_PERSON', 12500, 'RUB', true),
                    (:negotiated, :service, 'negotiated', NULL, 'NEGOTIATED', NULL, 'RUB', true),
-                       (:hidden, :inactive, 'hidden', 1, 'FIXED_PER_PERSON', 1, 'RUB', true)"""), {"fixed": fixed_id, "negotiated": negotiated_id, "hidden": inactive_option, "service": service_id, "inactive": inactive_service})
-    before = {table: database.connect().execute(text(f"SELECT count(*) FROM {table}")).scalar_one() for table in ("contact_cards", "channel_identities", "conversation_drafts", "inquiries", "operation_receipts", "change_events", "notification_jobs")}
+                   (:hidden, :service, 'inactive-option', 1, 'FIXED_PER_PERSON', 1, 'RUB', false),
+                   (:inactive_service_option, :inactive, 'hidden', 1, 'FIXED_PER_PERSON', 1, 'RUB', true)"""), {"fixed": fixed_id, "negotiated": negotiated_id, "hidden": inactive_option, "inactive_service_option": inactive_service_option, "service": service_id, "inactive": inactive_service})
+    tables = ("contact_cards", "channel_identities", "conversation_drafts", "inquiries", "inquiry_terms", "operation_receipts", "receipt_inquiries", "channel_events", "change_events", "event_inquiries", "notification_jobs", "notification_recipient_state")
+    def snapshot():
+        with database.connect() as connection:
+            return {table: connection.execute(text(f"SELECT count(*) FROM {table}")).scalar_one() for table in tables}
+    before = snapshot()
     gateway = ChannelGateway(port(database))
     telegram = gateway.read_catalog(context(Platform.TELEGRAM)).catalog
     vk = gateway.read_catalog(context(Platform.VK)).catalog
     assert telegram == vk
     assert set(telegram) == {"catalog_version", "club_timezone", "contact_info", "location_link", "visit_rules", "services"}
-    assert len(telegram["services"]) == 1
-    assert {option["pricing_mode"] for option in telegram["services"][0]["options"]} == {"FIXED_PER_PERSON", "NEGOTIATED"}
-    after = {table: database.connect().execute(text(f"SELECT count(*) FROM {table}")).scalar_one() for table in before}
+    assert telegram["services"] == [{"id": str(service_id), "title": "Ride", "description": "Description", "information": "Information", "options": [
+        {"id": str(fixed_id), "duration_minutes": 60, "pricing_mode": "FIXED_PER_PERSON", "price_minor": 12500, "currency": "RUB"},
+        {"id": str(negotiated_id), "duration_minutes": None, "pricing_mode": "NEGOTIATED", "price_minor": None, "currency": "RUB"},
+    ]}]
+    after = snapshot()
     assert after == before
 
 
