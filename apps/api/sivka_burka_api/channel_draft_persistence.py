@@ -20,6 +20,7 @@ from .channel_gateway import (
     ChannelContext, Draft, DraftSaved, GatewayError, InquiryReceipt, ResetResult,
     _id, _submission_fields, _version, validate_context,
 )
+from .public_catalog import PublicCatalogRuntime
 
 
 IdentityResolver = Callable[[Any, ChannelContext], UUID | None]
@@ -66,7 +67,20 @@ class PostgresChannelDraftPort:
             raise ValueError("digest_key_version must be positive")
 
     def read_catalog(self, context: ChannelContext) -> Mapping[str, Any]:
-        raise GatewayError("UNSUPPORTED_OPERATION")
+        """Return the public projection without requiring channel state.
+
+        The landing-page runtime is the sole owner of catalog projection and
+        filtering semantics.  Keep this boundary read-only and deliberately
+        hide database/configuration failures from trusted channel adapters.
+        """
+        validate_context(context)
+        try:
+            catalog = PublicCatalogRuntime(self.engine).read()
+        except Exception as exc:
+            raise GatewayError("CATALOG_UNAVAILABLE") from None
+        if not isinstance(catalog, Mapping) or not catalog.get("services"):
+            raise GatewayError("CATALOG_UNAVAILABLE")
+        return catalog
 
     def submit_inquiry(self, context: ChannelContext, fields: Mapping[str, Any], draft_version: int, submit_event_id: str) -> InquiryReceipt:
         context = validate_context(context)
