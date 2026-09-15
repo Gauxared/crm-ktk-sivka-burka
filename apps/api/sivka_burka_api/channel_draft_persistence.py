@@ -15,12 +15,13 @@ from typing import Any, Callable, Mapping
 from uuid import UUID, uuid4
 
 from sqlalchemy import Engine, text
+from sqlalchemy.exc import SQLAlchemyError
 
 from .channel_gateway import (
     ChannelContext, Draft, DraftSaved, GatewayError, InquiryReceipt, ResetResult,
     _id, _submission_fields, _version, validate_context,
 )
-from .public_catalog import PublicCatalogRuntime
+from .public_catalog import PublicCatalogRuntime, PublicCatalogUnavailable
 
 
 IdentityResolver = Callable[[Any, ChannelContext], UUID | None]
@@ -76,7 +77,7 @@ class PostgresChannelDraftPort:
         validate_context(context)
         try:
             catalog = PublicCatalogRuntime(self.engine).read()
-        except Exception as exc:
+        except (PublicCatalogUnavailable, SQLAlchemyError):
             raise GatewayError("CATALOG_UNAVAILABLE") from None
         if not isinstance(catalog, Mapping) or not catalog.get("services"):
             raise GatewayError("CATALOG_UNAVAILABLE")
