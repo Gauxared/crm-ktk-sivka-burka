@@ -18,5 +18,9 @@ integrating tests run against a stale base. Rebase/recovery is a lead operation 
 new validation/review; automatic conflict resolution is intentionally absent.
 Finish commits task files and merges with --no-ff. Cleanup checks DONE, a clean worktree,
 and task commit ancestry before `git worktree remove`; branch is retained for traceability.
+The controller removes only audited Python/pytest cache artifacts from the exact recorded task
+worktree. Any other ignored artifact, environment file, link or path escape blocks cleanup.
+Never run `git clean -fdX` in the primary checkout: it contains ignored live pipeline state and
+run evidence. Use `python scripts/task.py cleanup ID` after inspecting a concrete failure.
 Crash recovery: inspect state, Git log and worktree list. Never blindly delete lock/state
 or run forced removal. Back up state and reconcile completed Git operations manually.

@@ -36,6 +36,9 @@ PASS requires empty blocking, three passing assessments and matching validation 
 Reviews are lead assertions, not cryptographic identities. Worker cannot call the runner.
 Changes after validation or review invalidate approval. No DONE on failed merge.
 Merge conflicts block; resolve explicitly, do not use forced cleanup or discard changes.
+Cleanup is controller-owned. It may remove only `.pytest_cache`, `__pycache__`, `.pyc` and `.pyo`
+artifacts inside the verified task worktree. Unknown ignored files fail closed; manually cleaning
+the primary checkout is forbidden because `.pipeline/state.json` and run evidence are ignored.
 
 ## Execution policy v2
 

@@ -1,0 +1,50 @@
+{
+  "id": "PIPE-011",
+  "title": "Safely remove generated caches during task worktree cleanup",
+  "type": "implementation",
+  "status": "BACKLOG",
+  "priority": "high",
+  "executor": {"preferred": "cloud", "fallback": "cloud"},
+  "reviewer": "cloud",
+  "depends_on": ["PIPE-010"],
+  "allowed_paths": [
+    "scripts/task.py",
+    "tests/pipeline/**",
+    "docs/git-workflow.md",
+    "docs/task-lifecycle.md",
+    "tasks/specs/PIPE-011.json",
+    "reports/evidence/pipeline-state-recovery-2026-09-15.json"
+  ],
+  "forbidden_paths": [".env", ".env.*", "apps/**", "alembic/**", "packages/**", ".pipeline/**"],
+  "context": [
+    "AGENTS.md",
+    "docs/development-pipeline.md",
+    "docs/git-workflow.md",
+    "docs/task-lifecycle.md",
+    "scripts/task.py",
+    "scripts/policy.py",
+    "tests/pipeline/test_pipeline.py"
+  ],
+  "requirements": [
+    "Make cleanup operate only on the exact task worktree returned by self.worktree(r), never on the primary checkout, and retain the DONE-state and implementation-commit ancestry safeguards.",
+    "Automatically remove only audited generated Python and pytest cache artifacts from the task worktree without invoking generic recursive git clean. Reject unknown ignored paths, secret-like files including .env, links or junctions, traversal, resolution outside the task worktree, and any ordinary worktree change with a concrete reason.",
+    "After approved cache removal, repeat git status --porcelain --ignored and the implementation ancestry check before git worktree remove. Preserve Windows compatibility and existing lifecycle guarantees.",
+    "Add focused positive and negative regression coverage, document the normal cleanup behavior and explicit ban on manually cleaning the primary checkout, and record the bounded provenance and limitations of the 2026-09-15 reconstructed pipeline state without representing it as original telemetry."
+  ],
+  "acceptance": [
+    "A DONE task worktree containing only generated .pytest_cache, __pycache__, .pyc or .pyo artifacts finishes cleanup through the normal controller command.",
+    "Unknown ignored artifacts, .env, wrong worktrees, pre-DONE cleanup, links, junctions or escaping paths fail closed and primary ignored state/sentinels remain untouched.",
+    "Focused pipeline tests, whitespace validation, actual-diff self-review and the complete central-runner lifecycle pass without git clean in the primary checkout."
+  ],
+  "validation": [
+    {"name": "pipeline tests", "argv": ["{python}", "-m", "pytest", "tests/pipeline", "-q"], "timeout": 90},
+    {"name": "whitespace", "argv": ["git", "diff", "--check"], "timeout": 10}
+  ],
+  "risk": "high",
+  "retry_limit": 0,
+  "shared_paths_approval": {
+    "paths": ["scripts/task.py", "tasks/specs/PIPE-011.json"],
+    "reviewer": "cloud:codex",
+    "reason": "PIPE-011 is an accepted emergency pipeline-safety task whose controller implementation and immutable registered specification necessarily modify shared process paths."
+  }
+}

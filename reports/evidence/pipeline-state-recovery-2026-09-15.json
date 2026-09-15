@@ -1,0 +1,25 @@
+{
+  "incident": "An erroneous manual ignored-file cleanup ran in the primary checkout after BOT-003 had been validated, reviewed and merged.",
+  "lost_local_only_data": [
+    ".pipeline/state.json",
+    "ignored reports/runs evidence"
+  ],
+  "unaffected_evidence": [
+    "tracked source and task specifications",
+    "reviewed first-parent merge commits",
+    "retained task branches and worktrees",
+    "reports/evidence/state-after-bootstrap.json",
+    "origin/master at 03947e5013204d31262488e1a579f83b34095057"
+  ],
+  "reconstruction": {
+    "done_tasks": 61,
+    "blocked_tasks": ["POC-003", "POC-004"],
+    "dependency_check": "all registered dependencies present",
+    "external_backup_created": true
+  },
+  "limitations": [
+    "Intermediate historical events and deleted reports/runs gate logs were not reconstructed.",
+    "Recovered PASS markers identify reviewed merge ancestry and are not the original validation telemetry.",
+    "POC-003 and POC-004 remain blocked and require an explicit fresh recovery decision before resume."
+  ]
+}

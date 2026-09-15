@@ -144,7 +144,9 @@ class GitLifecycle(unittest.TestCase):
         git(self.root, 'init', '-b', 'main')
         git(self.root, 'config', 'user.name', 'Pipeline Test')
         git(self.root, 'config', 'user.email', 'pipeline@example.invalid')
-        (self.root / '.gitignore').write_text('.pipeline/\n.worktrees/\nreports/\n')
+        (self.root / '.gitignore').write_text(
+            '.pipeline/\n.worktrees/\nreports/\n.env\n.pytest_cache/\n__pycache__/\n*.pyc\n*.pyo\n'
+        )
         git(self.root, 'add', '.')
         git(self.root, 'commit', '-m', 'Test genesis')
         self.pipeline = Pipeline(self.root)
@@ -446,6 +448,87 @@ class GitLifecycle(unittest.TestCase):
         self.start_edit()
         with self.assertRaises(PipelineError):
             self.pipeline.cleanup('POC-100')
+
+    def finish_for_cleanup(self):
+        self.start_edit()
+        self.pipeline.validate('POC-100')
+        self.approve()
+        self.pipeline.finish('POC-100')
+        return self.pipeline.get('POC-100')
+
+    def test_cleanup_removes_only_known_worktree_caches_and_preserves_primary_state(self):
+        r = self.finish_for_cleanup()
+        wt = Path(r['worktree'])
+        (wt / '.pytest_cache').mkdir()
+        (wt / '.pytest_cache/CACHEDIR.TAG').write_text('cache')
+        (wt / 'apps/api/__pycache__').mkdir(parents=True)
+        (wt / 'apps/api/__pycache__/example.pyc').write_bytes(b'cache')
+        sentinel = self.root / '.pipeline/state-sentinel.json'
+        sentinel.write_text('primary state must survive')
+
+        self.pipeline.cleanup('POC-100')
+
+        self.assertTrue(sentinel.exists())
+        self.assertEqual(sentinel.read_text(), 'primary state must survive')
+        self.assertIsNone(r['worktree'])
+        self.assertFalse(wt.exists())
+
+    def test_cleanup_rejects_unknown_ignored_artifact_without_partial_deletion(self):
+        r = self.finish_for_cleanup()
+        wt = Path(r['worktree'])
+        (wt / '.pytest_cache').mkdir()
+        (wt / '.pytest_cache/CACHEDIR.TAG').write_text('cache')
+        valuable = wt / 'reports/valuable-result.txt'
+        valuable.parent.mkdir()
+        valuable.write_text('keep')
+
+        with self.assertRaisesRegex(PipelineError, 'Unknown ignored artifact'):
+            self.pipeline.cleanup('POC-100')
+
+        self.assertTrue(valuable.exists())
+        self.assertTrue((wt / '.pytest_cache').exists())
+
+    def test_cleanup_rejects_ignored_environment_file(self):
+        r = self.finish_for_cleanup()
+        env_file = Path(r['worktree']) / '.env'
+        env_file.write_text('SYNTHETIC=value')
+
+        with self.assertRaisesRegex(PipelineError, r'Unknown ignored artifact blocks cleanup: \.env'):
+            self.pipeline.cleanup('POC-100')
+
+        self.assertTrue(env_file.exists())
+
+    def test_cleanup_rejects_primary_checkout_as_recorded_worktree(self):
+        r = self.finish_for_cleanup()
+        actual = r['worktree']
+        r['worktree'] = str(self.root)
+        try:
+            with self.assertRaisesRegex(PipelineError, 'Worktree state path mismatch'):
+                self.pipeline.cleanup('POC-100')
+        finally:
+            r['worktree'] = actual
+
+    def test_cleanup_rejects_ignored_cache_link(self):
+        r = self.finish_for_cleanup()
+        wt = Path(r['worktree'])
+        with tempfile.TemporaryDirectory() as outside:
+            link = wt / '__pycache__'
+            if os.name == 'nt':
+                subprocess.run(
+                    ['powershell', '-NoProfile', '-Command',
+                     'New-Item -ItemType Junction -Path $env:PIPE_TEST_LINK -Target $env:PIPE_TEST_TARGET'],
+                    env={**os.environ, 'PIPE_TEST_LINK': str(link), 'PIPE_TEST_TARGET': outside},
+                    capture_output=True, check=True)
+            else:
+                link.symlink_to(outside, target_is_directory=True)
+            try:
+                with self.assertRaisesRegex(PipelineError, 'Link/reparse cache path denied'):
+                    self.pipeline.cleanup('POC-100')
+            finally:
+                if os.name == 'nt':
+                    link.rmdir()
+                else:
+                    link.unlink()
 
 
 if __name__ == '__main__':

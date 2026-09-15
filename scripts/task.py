@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 
@@ -336,7 +337,50 @@ class Pipeline:
         r = self.get(task_id)
         require(r['state'] == 'DONE', 'Cleanup requires DONE')
         wt = self.worktree(r)
-        require(not git(wt, 'status', '--porcelain', '--ignored'), 'Worktree has changes/ignored files; inspect and remove generated files explicitly')
+        require(wt.resolve() != self.root, 'Refusing to clean the primary checkout')
+        # Git may omit an empty ignored link from status output. Reject cache-shaped links
+        # before relying on the ignored-file inventory, and never follow them while walking.
+        for folder, directories, _ in os.walk(wt, topdown=True, followlinks=False):
+            for directory in directories:
+                if directory.lower() not in {'.pytest_cache', '__pycache__'}:
+                    continue
+                candidate = Path(folder) / directory
+                require(not candidate.is_symlink() and not candidate.is_junction(),
+                        f'Link/reparse cache path denied: {candidate.relative_to(wt)}')
+        result = subprocess.run(
+            ['git', '-c', 'core.quotepath=false', 'status', '--porcelain=v1', '--ignored', '-z'],
+            cwd=wt, capture_output=True)
+        require(result.returncode == 0, result.stderr.decode('utf-8', 'replace').strip())
+        entries = [item.decode('utf-8', 'replace') for item in result.stdout.split(b'\0') if item]
+        changed = [item for item in entries if not item.startswith('!! ')]
+        require(not changed, 'Worktree has tracked or untracked changes: ' + ', '.join(changed))
+
+        caches = []
+        for item in entries:
+            name = item[3:].rstrip('/')
+            target = safe_path(wt, name)
+            parts = tuple(part.lower() for part in Path(name).parts)
+            allowed_dir = target.is_dir() and parts[-1] in {'.pytest_cache', '__pycache__'}
+            allowed_file = target.is_file() and target.suffix.lower() in {'.pyc', '.pyo'}
+            require(allowed_dir or allowed_file,
+                    f'Unknown ignored artifact blocks cleanup: {name}')
+            caches.append(target)
+
+        # Validate every ignored entry before deleting any of them. Deeper paths go first if
+        # a Git version reports both a cache directory and one of its children.
+        for target in sorted(set(caches), key=lambda path: len(path.parts), reverse=True):
+            if not target.exists():
+                continue
+            if target.is_dir():
+                shutil.rmtree(target)
+            else:
+                target.unlink()
+
+        result = subprocess.run(
+            ['git', '-c', 'core.quotepath=false', 'status', '--porcelain=v1', '--ignored', '-z'],
+            cwd=wt, capture_output=True)
+        require(result.returncode == 0, result.stderr.decode('utf-8', 'replace').strip())
+        require(not result.stdout, 'Worktree still has changes or ignored files after cache cleanup')
         git(self.root, 'merge-base', '--is-ancestor', r['implementation_commit'], 'HEAD')
         git(self.root, 'worktree', 'remove', str(wt))
         r['worktree'] = None
