@@ -1,0 +1,18 @@
+(function () {
+  'use strict';
+  const app = document.querySelector('#app');
+  const session = { csrfToken: null, ownerId: null };
+  const jsonHeaders = {'Content-Type': 'application/json', 'X-Requested-With': 'crm'};
+  const api = (method, body, csrf) => fetch('/api/v1/admin/session', {
+    method, credentials: 'include', headers: Object.assign({}, jsonHeaders, csrf ? {'X-CSRF-Token': csrf} : {}),
+    body: body === undefined ? undefined : JSON.stringify(body)
+  });
+  const message = (text, kind) => '<p class="message ' + (kind || '') + '" role="alert">' + text + '</p>';
+  function loginView(note) { app.innerHTML = '<section class="card login"><p class="eyebrow">КТК «Сивка-Бурка»</p><h1>Вход в CRM</h1><p>Закрытая рабочая область владельца.</p>' + (note || '') + '<form id="login-form"><label for="login">Логин</label><input id="login" name="login" autocomplete="username" required><label for="password">Пароль</label><input id="password" name="password" type="password" autocomplete="current-password" required><button type="submit">Войти</button></form><div id="login-status" aria-live="polite"></div></section>'; document.querySelector('#login-form').addEventListener('submit', signIn); }
+  function unavailable() { loginView(message('Сервис временно недоступен. Проверьте соединение и повторите попытку.', 'error')); }
+  async function signIn(event) { event.preventDefault(); const form = event.currentTarget; const status = document.querySelector('#login-status'); status.textContent = 'Проверяем данные…'; try { const r = await api('POST', {login: form.login.value, password: form.password.value}); if (r.status === 401) return loginView(message('Не удалось войти. Проверьте логин и пароль.', 'error')); if (!r.ok) return r.status >= 500 ? unavailable() : loginView(message('Не удалось выполнить вход. Попробуйте ещё раз.', 'error')); const data = (await r.json()).data; session.csrfToken = data.csrf_token; session.ownerId = data.owner_id; shell(); } catch (_) { unavailable(); } }
+  async function bootstrap() { try { const r = await fetch('/api/v1/admin/session', {method: 'GET', credentials: 'include'}); if (r.status === 401) return loginView(); if (!r.ok) return r.status >= 500 ? unavailable() : loginView(message('Не удалось проверить сессию. Повторите попытку.', 'error')); const data = (await r.json()).data; session.csrfToken = data.csrf_token; session.ownerId = data.owner_id; shell(); } catch (_) { unavailable(); } }
+  function shell() { app.innerHTML = '<div class="shell"><header><div><p class="eyebrow">CRM владельца</p><h1>Сивка-Бурка</h1></div><button id="logout" class="secondary">Выйти</button></header><nav aria-label="Основная навигация"><a href="#inquiries">Заявки</a><a href="#calendar">Календарь</a></nav><section class="card"><h2>Рабочая область</h2><p>Вы вошли как владелец. Разделы подключаются по мере готовности.</p><div class="placeholder" id="inquiries"><h3>Заявки</h3><p>Раздел пока представлен навигационной заглушкой.</p></div><div class="placeholder" id="calendar"><h3>Календарь</h3><p>Раздел пока представлен навигационной заглушкой.</p></div></section><div id="shell-status" aria-live="polite"></div></div>'; document.querySelector('#logout').addEventListener('click', signOut); }
+  async function signOut() { const status = document.querySelector('#shell-status'); try { const r = await api('DELETE', undefined, session.csrfToken); if (!r.ok && r.status >= 500) return status.innerHTML = message('Выход временно недоступен. Повторите попытку.', 'error'); session.csrfToken = null; session.ownerId = null; loginView(message('Вы вышли из CRM.', 'success')); } catch (_) { status.innerHTML = message('Не удалось выполнить выход. Проверьте соединение.', 'error'); } }
+  bootstrap();
+}());
