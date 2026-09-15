@@ -474,20 +474,42 @@ class GitLifecycle(unittest.TestCase):
         self.assertIsNone(r['worktree'])
         self.assertFalse(wt.exists())
 
+    def test_cleanup_removes_read_only_known_cache_artifacts(self):
+        r = self.finish_for_cleanup()
+        wt = Path(r['worktree'])
+        cache = wt / 'apps/api/__pycache__'
+        cache.mkdir(parents=True)
+        bytecode = cache / 'locked.pyc'
+        bytecode.write_bytes(b'cache')
+        os.chmod(bytecode, bytecode.stat().st_mode & ~stat.S_IWRITE)
+        os.chmod(cache, cache.stat().st_mode & ~stat.S_IWRITE)
+
+        self.pipeline.cleanup('POC-100')
+
+        self.assertIsNone(r['worktree'])
+        self.assertFalse(wt.exists())
+
     def test_cleanup_rejects_unknown_ignored_artifact_without_partial_deletion(self):
         r = self.finish_for_cleanup()
         wt = Path(r['worktree'])
         (wt / '.pytest_cache').mkdir()
         (wt / '.pytest_cache/CACHEDIR.TAG').write_text('cache')
+        os.chmod(wt / '.pytest_cache', (wt / '.pytest_cache').stat().st_mode & ~stat.S_IWRITE)
         valuable = wt / 'reports/valuable-result.txt'
         valuable.parent.mkdir()
         valuable.write_text('keep')
 
-        with self.assertRaisesRegex(PipelineError, 'Unknown ignored artifact'):
-            self.pipeline.cleanup('POC-100')
+        try:
+            with self.assertRaisesRegex(PipelineError, 'Unknown ignored artifact'):
+                self.pipeline.cleanup('POC-100')
 
-        self.assertTrue(valuable.exists())
-        self.assertTrue((wt / '.pytest_cache').exists())
+            self.assertTrue(valuable.exists())
+            self.assertTrue((wt / '.pytest_cache').exists())
+            self.assertFalse((wt / '.pytest_cache').stat().st_mode & stat.S_IWRITE)
+        finally:
+            cache = wt / '.pytest_cache'
+            if cache.exists():
+                os.chmod(cache, cache.stat().st_mode | stat.S_IWRITE)
 
     def test_cleanup_rejects_ignored_environment_file(self):
         r = self.finish_for_cleanup()
