@@ -20,6 +20,9 @@ Finish commits task files and merges with --no-ff. Cleanup checks DONE, a clean 
 and task commit ancestry before `git worktree remove`; branch is retained for traceability.
 The controller removes only audited Python/pytest cache artifacts from the exact recorded task
 worktree. Any other ignored artifact, environment file, link or path escape blocks cleanup.
+Before `git worktree remove`, it clears read-only bits only inside that verified worktree and its
+exact `.git/worktrees/<ID>` metadata directory. This supports OneDrive folders without forced
+removal and without changing the primary checkout or unrelated Git metadata.
 Never run `git clean -fdX` in the primary checkout: it contains ignored live pipeline state and
 run evidence. Use `python scripts/task.py cleanup ID` after inspecting a concrete failure.
 Crash recovery: inspect state, Git log and worktree list. Never blindly delete lock/state
