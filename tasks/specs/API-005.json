@@ -1,0 +1,25 @@
+{
+  "id": "API-005",
+  "title": "Expose authenticated owner negotiation start",
+  "type": "implementation",
+  "status": "BACKLOG",
+  "priority": "high",
+  "executor": {"preferred": "cloud", "fallback": "cloud"},
+  "reviewer": "cloud",
+  "depends_on": ["AUTH-003", "API-002", "CMD-003"],
+  "allowed_paths": ["apps/api/sivka_burka_api/main.py", "tests/admin_commands/**", "tasks/specs/API-005.json"],
+  "forbidden_paths": [".env", ".env.*", "alembic/**", "apps/api/sivka_burka_api/admin_sessions.py", "apps/api/sivka_burka_api/admin_commands.py", "apps/api/sivka_burka_api/owner_commands.py", "apps/api/sivka_burka_api/admin_inquiries.py", "apps/api/sivka_burka_api/admin_visits.py", "apps/api/sivka_burka_api/inquiries.py", "apps/web/**", "docs/**", "scripts/**", "pyproject.toml", "apps/bots/**", "packages/**"],
+  "context": ["AGENTS.md", "docs/development-pipeline.md", "docs/api.md", "docs/booking-flow.md", "apps/api/sivka_burka_api/main.py", "apps/api/sivka_burka_api/owner_commands.py", "tests/admin_commands/test_admin_inquiry_confirm_postgres.py"],
+  "requirements": [
+    "Extend the existing POST /api/v1/admin/inquiries/{inquiry_id}/commands adapter to accept exactly the reviewed START_NEGOTIATION envelope {type:'START_NEGOTIATION', expected_version, expected_visit_versions:{}, payload:{}} and delegate only to OwnerCommandService.start_negotiation. Preserve existing CONFIRM behavior exactly and do not expose other command types or modify core validation.",
+    "Require valid owner session, exact Origin, application/json, matching X-CSRF-Token and Idempotency-Key before dispatch. Preserve no-store error boundary: 401 AUTH_REQUIRED, 403 FORBIDDEN or CSRF_FAILED, 415 UNSUPPORTED_MEDIA_TYPE. Malformed inquiry UUID returns 404 without dispatch.",
+    "On first acceptance return 200 {data:{command_id,inquiry,changed_visits:[]}}. Identical accepted replay returns exactly the saved data with Idempotent-Replay:true. Strict envelope/type failures and missing idempotency key reject before dispatch and do not consume the key.",
+    "Map NOT_FOUND to 404; IDEMPOTENCY_MISMATCH and VERSION_CONFLICT to 409; RESULT_EXPIRED to 410; EXPECTED_VERSION_REQUIRED, INVALID_TRANSITION and VALIDATION_ERROR to 422 without diagnostics. Keep complete mapping for CONFIRM unchanged.",
+    "Add isolated synthetic PostgreSQL route tests for browser boundary, strict START_NEGOTIATION envelope and preserving CONFIRM strictness, missing key and reusable key after rejection, malformed/unknown inquiry, NEW success/status and no changed visits, invalid source statuses, stale/nonempty visit versions, stable replay/mismatch/expiry, audit receipt persistence and unchanged participation/cash facts. Never read local .env or configured source database.",
+    "Do not add other inquiry or visit commands, participation changes, payments, checkout, webhooks, notifications, migrations, frontend, bots, secrets or external calls."
+  ],
+  "acceptance": ["A signed-in owner can explicitly begin negotiation for a NEW inquiry through the existing command endpoint and receive the complete stable card result.", "Browser state, versions and idempotency protect the transition without changing calendar or financial state.", "Focused synthetic PostgreSQL route tests, scope and whitespace checks pass."],
+  "validation": [{"name":"API-005 tests","argv":["{python}","-m","pytest","tests/admin_commands","-q"],"timeout":180},{"name":"whitespace","argv":["git","diff","--check"],"timeout":10}],
+  "risk": "high", "retry_limit": 0,
+  "shared_paths_approval": {"paths":["apps/api/sivka_burka_api/main.py","tests/admin_commands/**","tasks/specs/API-005.json"],"reviewer":"cloud:codex","reason":"Accepted narrow HTTP adapter for reviewed NEW to NEGOTIATING core transition; it neither changes participation nor financial state."}
+}
