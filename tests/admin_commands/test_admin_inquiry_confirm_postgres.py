@@ -125,6 +125,99 @@ def envelope(visit_id: UUID, *, inquiry_version: int = 1, visit_version: int = 1
     return {"type": "CONFIRM", "expected_version": inquiry_version, "expected_visit_versions": {str(visit_id): visit_version}, "payload": {"visit_id": str(visit_id)}}
 
 
+def negotiation_envelope(*, inquiry_version: object = 1, expected_visit_versions: object = None, payload: object = None) -> dict[str, object]:
+    return {
+        "type": "START_NEGOTIATION",
+        "expected_version": inquiry_version,
+        "expected_visit_versions": {} if expected_visit_versions is None else expected_visit_versions,
+        "payload": {} if payload is None else payload,
+    }
+
+
+def test_start_negotiation_returns_stable_result_replay_and_audit(database: Engine):
+    owner_id, service_id = seed(database)
+    inquiry_id = create_inquiry(database, service_id)
+    client = client_for(database)
+    csrf_token = login(client)
+    target = f"/api/v1/admin/inquiries/{inquiry_id}/commands"
+    request_headers = headers(csrf_token, "start-negotiation")
+    payload = negotiation_envelope()
+
+    first = client.post(target, headers=request_headers, json=payload)
+    assert first.status_code == 200 and first.headers["cache-control"] == "no-store"
+    data = first.json()["data"]
+    assert set(data) == {"command_id", "inquiry", "changed_visits"}
+    assert data["inquiry"]["status"] == "NEGOTIATING"
+    assert data["changed_visits"] == []
+
+    with database.begin() as connection:
+        connection.execute(text("UPDATE inquiries SET requester_name='Changed projection' WHERE id=:id"), {"id": inquiry_id})
+    replay = client.post(target, headers=request_headers, json=payload)
+    assert replay.status_code == 200 and replay.headers["idempotent-replay"] == "true"
+    assert replay.json() == first.json()
+
+    mismatch = client.post(target, headers=request_headers, json=negotiation_envelope(inquiry_version=2))
+    assert mismatch.status_code == 409 and mismatch.json() == {"error": {"code": "IDEMPOTENCY_MISMATCH"}}
+    with database.connect() as connection:
+        assert connection.execute(text("SELECT count(*) FROM visit_participations WHERE inquiry_id=:id"), {"id": inquiry_id}).scalar_one() == 0
+        assert connection.execute(text("SELECT count(*) FROM cash_notes WHERE inquiry_id=:id"), {"id": inquiry_id}).scalar_one() == 0
+        assert connection.execute(text("SELECT count(*) FROM operation_receipts WHERE canonical_path=:path"), {"path": target}).scalar_one() == 1
+        assert connection.execute(text("SELECT count(*) FROM change_events WHERE command_id=:id AND action='INQUIRY_NEGOTIATION_STARTED'"), {"id": UUID(data["command_id"])}).scalar_one() == 1
+
+    with database.begin() as connection:
+        connection.execute(text("UPDATE operation_receipts SET result_json=NULL, tombstoned_at=now() WHERE id=:id"), {"id": UUID(data["command_id"])})
+    expired = client.post(target, headers=request_headers, json=payload)
+    assert expired.status_code == 410 and expired.json() == {"error": {"code": "RESULT_EXPIRED"}}
+
+
+@pytest.mark.parametrize("status", ["NEGOTIATING", "CANCELLED", "CONFIRMED"])
+def test_start_negotiation_rejects_invalid_source_without_mutation(database: Engine, status: str):
+    _owner_id, service_id = seed(database)
+    inquiry_id = create_inquiry(database, service_id, status=status)
+    client = client_for(database)
+    csrf_token = login(client)
+    target = f"/api/v1/admin/inquiries/{inquiry_id}/commands"
+    response = client.post(target, headers=headers(csrf_token, f"start-{status}"), json=negotiation_envelope())
+    assert response.status_code == 422 and response.json() == {"error": {"code": "INVALID_TRANSITION"}}
+    with database.connect() as connection:
+        assert connection.execute(text("SELECT status, version FROM inquiries WHERE id=:id"), {"id": inquiry_id}).one() == (status, 1)
+        assert connection.execute(text("SELECT count(*) FROM operation_receipts WHERE canonical_path=:path"), {"path": target}).scalar_one() == 0
+        assert connection.execute(text("SELECT count(*) FROM visit_participations WHERE inquiry_id=:id"), {"id": inquiry_id}).scalar_one() == 0
+        assert connection.execute(text("SELECT count(*) FROM cash_notes WHERE inquiry_id=:id"), {"id": inquiry_id}).scalar_one() == 0
+
+
+def test_start_negotiation_strict_rejection_does_not_consume_key(database: Engine):
+    _owner_id, service_id = seed(database)
+    inquiry_id = create_inquiry(database, service_id)
+    client = client_for(database)
+    csrf_token = login(client)
+    target = f"/api/v1/admin/inquiries/{inquiry_id}/commands"
+    request_headers = headers(csrf_token, "reusable-start-key")
+    for malformed in (
+        {"type": "START_NEGOTIATION", "expected_version": 1, "expected_visit_versions": {}, "payload": {}, "extra": True},
+        negotiation_envelope(expected_visit_versions={str(uuid4()): 1}),
+        negotiation_envelope(payload={"unexpected": True}),
+        {**negotiation_envelope(), "type": "COMPLETE"},
+    ):
+        rejected = client.post(target, headers=request_headers, json=malformed)
+        assert rejected.status_code == 422 and rejected.json() == {"error": {"code": "VALIDATION_ERROR"}}
+    accepted = client.post(target, headers=request_headers, json=negotiation_envelope())
+    assert accepted.status_code == 200 and "idempotent-replay" not in accepted.headers
+
+
+def test_start_negotiation_stale_version_maps_conflict_without_receipt(database: Engine):
+    _owner_id, service_id = seed(database)
+    inquiry_id = create_inquiry(database, service_id)
+    client = client_for(database)
+    csrf_token = login(client)
+    target = f"/api/v1/admin/inquiries/{inquiry_id}/commands"
+    response = client.post(target, headers=headers(csrf_token, "stale-start"), json=negotiation_envelope(inquiry_version=2))
+    assert response.status_code == 409 and response.json() == {"error": {"code": "VERSION_CONFLICT"}}
+    with database.connect() as connection:
+        assert connection.execute(text("SELECT status, version FROM inquiries WHERE id=:id"), {"id": inquiry_id}).one() == ("NEW", 1)
+        assert connection.execute(text("SELECT count(*) FROM operation_receipts WHERE canonical_path=:path"), {"path": target}).scalar_one() == 0
+
+
 def test_confirm_requires_owner_browser_boundary_and_strict_envelope(database: Engine):
     owner_id, service_id = seed(database)
     inquiry_id = create_inquiry(database, service_id)

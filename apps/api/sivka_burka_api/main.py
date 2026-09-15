@@ -202,6 +202,19 @@ def create_app(*, public_submission_runtime: PublicSubmissionRuntime | None = No
             return _error(error.code, 422)
         return _error("VALIDATION_ERROR", 422)
 
+    def map_inquiry_negotiation_error(error: OwnerCommandError) -> JSONResponse:
+        if isinstance(error, OwnerIdempotencyMismatch) or error.code == "IDEMPOTENCY_MISMATCH":
+            return _error("IDEMPOTENCY_MISMATCH", 409)
+        if error.code == "NOT_FOUND":
+            return _error("NOT_FOUND", 404)
+        if error.code == "VERSION_CONFLICT":
+            return _error("VERSION_CONFLICT", 409)
+        if error.code == "RESULT_EXPIRED":
+            return _error("RESULT_EXPIRED", 410)
+        if error.code in {"EXPECTED_VERSION_REQUIRED", "INVALID_TRANSITION", "VALIDATION_ERROR"}:
+            return _error(error.code, 422)
+        return _error("VALIDATION_ERROR", 422)
+
     def map_cash_note_error(error: OwnerCommandError) -> JSONResponse:
         if isinstance(error, OwnerIdempotencyMismatch) or error.code == "IDEMPOTENCY_MISMATCH":
             return _error("IDEMPOTENCY_MISMATCH", 409)
@@ -369,7 +382,10 @@ def create_app(*, public_submission_runtime: PublicSubmissionRuntime | None = No
             envelope = await _json_object(request)
         except InquiryCommandError:
             return _error("VALIDATION_ERROR", 422)
-        if set(envelope) != {"type", "expected_version", "expected_visit_versions", "payload"} or envelope.get("type") != "CONFIRM":
+        if set(envelope) != {"type", "expected_version", "expected_visit_versions", "payload"} or envelope.get("type") not in {"CONFIRM", "START_NEGOTIATION"}:
+            return _error("VALIDATION_ERROR", 422)
+        command_type = envelope["type"]
+        if command_type == "START_NEGOTIATION" and (envelope["expected_visit_versions"] != {} or envelope["payload"] != {}):
             return _error("VALIDATION_ERROR", 422)
         idempotency_key = request.headers.get("Idempotency-Key")
         if not idempotency_key:
@@ -379,17 +395,20 @@ def create_app(*, public_submission_runtime: PublicSubmissionRuntime | None = No
         except ValueError:
             return _error("NOT_FOUND", 404)
         command_runtime, owner_id, _session = runtime
-        payload = {
+        payload = envelope if command_type == "START_NEGOTIATION" else {
             "expected_version": envelope["expected_version"],
             "expected_visit_versions": envelope["expected_visit_versions"],
             "payload": envelope["payload"],
         }
         try:
-            result = command_runtime.owner_commands(owner_id).confirm_inquiry(
-                target_inquiry_id, payload, idempotency_key
-            )
+            service = command_runtime.owner_commands(owner_id)
+            if command_type == "START_NEGOTIATION":
+                result = service.start_negotiation(target_inquiry_id, payload, idempotency_key)
+            else:
+                result = service.confirm_inquiry(target_inquiry_id, payload, idempotency_key)
         except OwnerCommandError as error:
-            return map_inquiry_confirmation_error(error)
+            return (map_inquiry_negotiation_error(error) if command_type == "START_NEGOTIATION"
+                    else map_inquiry_confirmation_error(error))
         headers = {**_NO_STORE, **({"Idempotent-Replay": "true"} if result.replay else {})}
         return JSONResponse({"data": result.response()}, headers=headers)
 
