@@ -94,6 +94,11 @@ def _complete(visit_id: UUID, inquiry_version: int = 2, visit_version: int = 2) 
             "expected_visit_versions": {str(visit_id): visit_version}, "payload": {}}
 
 
+def _cancel(reason: str = "Client declined", inquiry_version: int = 1, expected_visit_versions: dict[str, int] | None = None) -> dict[str, object]:
+    return {"type": "CANCEL", "expected_version": inquiry_version,
+            "expected_visit_versions": expected_visit_versions or {}, "payload": {"reason": reason}}
+
+
 def _confirmed_fixture(database: Engine, service: OwnerCommandService, service_id: UUID) -> tuple[UUID, UUID]:
     inquiry_id = _inquiry(database, service_id=service_id)
     visit = service.create_planned_visit(_visit_payload(service_id), f"visit-{uuid4()}")
@@ -671,3 +676,30 @@ def test_cash_correction_rejections_are_atomic_and_reason_key_remains_reusable(s
             (SELECT count(*) FROM change_events) FROM inquiries i JOIN visits v ON v.id=:visit WHERE i.id=:inquiry"""), {"inquiry": inquiry_id, "visit": visit.visit_id, "path": f"%{note_id}/corrections"}).one()
     assert before == (3, 3, 0, 1, 0, 3)
     assert after == (4, 4, 1, 1, 1, 4)
+
+
+def test_cancel_without_plan_preserves_visit_and_replays_stably(seeded: tuple[OwnerCommandService, UUID, UUID], database: Engine):
+    service, _, service_id = seeded
+    inquiry_id = _inquiry(database, service_id=service_id)
+    first = service.cancel_inquiry(inquiry_id, _cancel(), "cancel-unplanned")
+    replay = service.cancel_inquiry(inquiry_id, _cancel(), "cancel-unplanned")
+    assert first.response() == replay.response()
+    assert first.inquiry["status"] == "CANCELLED" and first.inquiry["version"] == 2
+    assert first.changed_visits == () and replay.replay is True
+    with database.connect() as connection:
+        assert connection.execute(text("SELECT count(*) FROM visits")).scalar_one() == 0
+        assert connection.execute(text("SELECT count(*) FROM change_events WHERE command_id=:id"), {"id": first.command_id}).scalar_one() == 1
+
+
+def test_cancel_closes_only_one_participation_with_snapshots_and_versions(seeded: tuple[OwnerCommandService, UUID, UUID], database: Engine):
+    service, _, service_id = seeded
+    inquiry_id, visit_id = _confirmed_fixture(database, service, service_id)
+    result = service.cancel_inquiry(inquiry_id, _cancel(inquiry_version=2, expected_visit_versions={str(visit_id): 2}), "cancel-planned")
+    assert result.inquiry["status"] == "CANCELLED" and result.changed_visits == ({"id": str(visit_id), "version": 3},)
+    with database.connect() as connection:
+        row = connection.execute(text("SELECT close_kind, participants_snapshot, plan_snapshot FROM visit_participations WHERE inquiry_id=:id"), {"id": inquiry_id}).one()
+        assert row[0] == "CANCELLED"
+        assert row[1] == {"participants_count": 1}
+        assert row[2]["visit"]["id"] == str(visit_id)
+        assert connection.execute(text("SELECT status, version FROM inquiries WHERE id=:id"), {"id": inquiry_id}).one() == ("CANCELLED", 3)
+        assert connection.execute(text("SELECT status, version FROM visits WHERE id=:id"), {"id": visit_id}).one() == ("PLANNED", 3)
