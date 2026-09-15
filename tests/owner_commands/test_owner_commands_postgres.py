@@ -89,6 +89,107 @@ def _response(result: object) -> dict[str, object]:
     return result.response()  # type: ignore[union-attr]
 
 
+def _complete(visit_id: UUID, inquiry_version: int = 2, visit_version: int = 2) -> dict[str, object]:
+    return {"type": "COMPLETE", "expected_version": inquiry_version,
+            "expected_visit_versions": {str(visit_id): visit_version}, "payload": {}}
+
+
+def _confirmed_fixture(database: Engine, service: OwnerCommandService, service_id: UUID) -> tuple[UUID, UUID]:
+    inquiry_id = _inquiry(database, service_id=service_id)
+    visit = service.create_planned_visit(_visit_payload(service_id), f"visit-{uuid4()}")
+    service.confirm_inquiry(inquiry_id, _confirm(visit.visit_id), f"confirm-{uuid4()}")
+    return inquiry_id, visit.visit_id
+
+
+def test_complete_inquiry_closes_one_participation_with_snapshots_and_keeps_group_open(seeded: tuple[OwnerCommandService, UUID, UUID], database: Engine):
+    service, _, service_id = seeded
+    inquiry_id, visit_id = _confirmed_fixture(database, service, service_id)
+    other_id = _inquiry(database, service_id=service_id)
+    service.confirm_inquiry(other_id, _confirm(visit_id, 1, 2), f"confirm-other-{uuid4()}")
+    with database.connect() as connection:
+        before = connection.execute(text("SELECT count(*) FROM cash_notes WHERE inquiry_id=:id"), {"id": inquiry_id}).scalar_one()
+        terms_before = dict(connection.execute(text("SELECT service_option_id,participants_count,duration_minutes,total_minor,expected_prepayment_minor,currency,note FROM inquiry_terms WHERE inquiry_id=:id"), {"id": inquiry_id}).mappings().one())
+    result = service.complete_inquiry(inquiry_id, _complete(visit_id, 2, 3), "complete-success")
+    response = _response(result)
+    assert response["inquiry"]["status"] == "COMPLETED"
+    assert response["inquiry"]["version"] == 3
+    assert response["inquiry"]["participation"] is None
+    assert response["changed_visits"] == [{"id": str(visit_id), "version": 4}]
+    with database.connect() as connection:
+        row = connection.execute(text("SELECT closed_at, close_kind, participants_snapshot, plan_snapshot FROM visit_participations WHERE inquiry_id=:id"), {"id": inquiry_id}).one()
+        other = connection.execute(text("SELECT closed_at FROM visit_participations WHERE inquiry_id=:id"), {"id": other_id}).scalar_one()
+        visit = connection.execute(text("SELECT status, version FROM visits WHERE id=:id"), {"id": visit_id}).one()
+        assert connection.execute(text("SELECT count(*) FROM cash_notes WHERE inquiry_id=:id"), {"id": inquiry_id}).scalar_one() == before
+        assert connection.execute(text("SELECT count(*) FROM receipt_inquiries ri JOIN operation_receipts r ON r.id=ri.receipt_id WHERE ri.inquiry_id=:id"), {"id": inquiry_id}).scalar_one() == 1
+        assert connection.execute(text("SELECT count(*) FROM change_events e JOIN event_inquiries x ON x.event_id=e.id JOIN event_visits v ON v.event_id=e.id WHERE e.action='INQUIRY_COMPLETED' AND x.inquiry_id=:id AND v.visit_id=:visit"), {"id": inquiry_id, "visit": visit_id}).scalar_one() == 1
+    assert row[1] == "PROVIDED" and row[0] is not None
+    assert row[2] == {"participants_count": 1}
+    assert row[3] == {"visit": {"id": str(visit_id), "service_id": str(service_id), "start_at": "2026-10-01T08:00:00+00:00", "duration_minutes": 60}, "terms": {"service_option_id": terms_before["service_option_id"].__str__(), "participants_count": 1, "duration_minutes": 60, "total_minor": terms_before["total_minor"], "expected_prepayment_minor": terms_before["expected_prepayment_minor"], "currency": "RUB", "note": terms_before["note"]}}
+    with database.connect() as connection:
+        assert dict(connection.execute(text("SELECT service_option_id,participants_count,duration_minutes,total_minor,expected_prepayment_minor,currency,note FROM inquiry_terms WHERE inquiry_id=:id"), {"id": inquiry_id}).mappings().one()) == terms_before
+    assert other is None and visit == ("PLANNED", 4)
+
+
+def test_complete_inquiry_replay_mismatch_and_expiry(seeded: tuple[OwnerCommandService, UUID, UUID], database: Engine):
+    service, _, service_id = seeded
+    inquiry_id, visit_id = _confirmed_fixture(database, service, service_id)
+    payload = _complete(visit_id)
+    first = service.complete_inquiry(inquiry_id, payload, "complete-replay")
+    stored = _response(first)
+    with database.begin() as connection:
+        connection.execute(text("UPDATE inquiries SET requester_name='later' WHERE id=:id"), {"id": inquiry_id})
+    replay = service.complete_inquiry(inquiry_id, payload, "complete-replay")
+    assert replay.replay and _response(replay) == stored
+    with pytest.raises(OwnerCommandError, match="IDEMPOTENCY_MISMATCH"):
+        service.complete_inquiry(inquiry_id, {**payload, "expected_version": 999}, "complete-replay")
+    with database.begin() as connection:
+        connection.execute(text("UPDATE operation_receipts SET result_json=NULL, tombstoned_at=now() WHERE id=:id"), {"id": first.command_id})
+    with pytest.raises(OwnerCommandError, match="RESULT_EXPIRED"):
+        service.complete_inquiry(inquiry_id, payload, "complete-replay")
+
+
+def test_complete_inquiry_rejects_nonplanned_visit_atomically(seeded: tuple[OwnerCommandService, UUID, UUID], database: Engine):
+    service, _, service_id = seeded
+    inquiry_id, visit_id = _confirmed_fixture(database, service, service_id)
+    with database.begin() as connection:
+        connection.execute(text("UPDATE visits SET status='CANCELLED' WHERE id=:id"), {"id": visit_id})
+    with pytest.raises(OwnerCommandError, match="INVALID_TRANSITION"):
+        service.complete_inquiry(inquiry_id, _complete(visit_id), "nonplanned")
+    with database.connect() as connection:
+        assert connection.execute(text("SELECT status,version FROM inquiries WHERE id=:id"), {"id": inquiry_id}).one() == ("CONFIRMED", 2)
+        assert connection.execute(text("SELECT closed_at FROM visit_participations WHERE inquiry_id=:id"), {"id": inquiry_id}).scalar_one() is None
+
+
+def test_complete_inquiry_version_shapes_are_atomic_and_key_reusable(seeded: tuple[OwnerCommandService, UUID, UUID], database: Engine):
+    service, _, service_id = seeded
+    inquiry_id, visit_id = _confirmed_fixture(database, service, service_id)
+    bad = [{"type": "COMPLETE", "expected_version": 2, "expected_visit_versions": {}, "payload": {}},
+           {"type": "COMPLETE", "expected_version": 2, "expected_visit_versions": {str(visit_id): 2, str(uuid4()): 1}, "payload": {}},
+           {"type": "COMPLETE", "expected_version": 1, "expected_visit_versions": {str(visit_id): 2}, "payload": {}},
+           {"type": "COMPLETE", "expected_version": 2, "expected_visit_versions": {str(visit_id): 1}, "payload": {}}]
+    codes = ["EXPECTED_VERSION_REQUIRED", "EXPECTED_VERSION_REQUIRED", "VERSION_CONFLICT", "VERSION_CONFLICT"]
+    for index, (payload, code) in enumerate(zip(bad, codes)):
+        with pytest.raises(OwnerCommandError, match=code):
+            service.complete_inquiry(inquiry_id, payload, f"version-bad-{index}")
+    result = service.complete_inquiry(inquiry_id, _complete(visit_id), "version-bad-0")
+    assert result.inquiry["status"] == "COMPLETED"
+
+
+@pytest.mark.parametrize("status", ["NEW", "NEGOTIATING", "COMPLETED", "CANCELLED"])
+def test_complete_inquiry_invalid_status_is_atomic_and_key_reusable(seeded: tuple[OwnerCommandService, UUID, UUID], database: Engine, status: str):
+    service, _, service_id = seeded
+    inquiry_id = _inquiry(database, status, service_id=service_id)
+    visit = service.create_planned_visit(_visit_payload(service_id), f"visit-invalid-{uuid4()}")
+    if status in {"COMPLETED", "CANCELLED"}:
+        with database.begin() as connection:
+            connection.execute(text("INSERT INTO visit_participations (id,inquiry_id,visit_id,joined_at) VALUES (:id,:inquiry,:visit,now())"), {"id": uuid4(), "inquiry": inquiry_id, "visit": visit.visit_id})
+    with pytest.raises(OwnerCommandError, match="INVALID_TRANSITION|PARTICIPATION_CONFLICT"):
+        service.complete_inquiry(inquiry_id, _complete(visit.visit_id, 1, 1), f"invalid-{status}")
+    with database.connect() as connection:
+        assert connection.execute(text("SELECT status,version FROM inquiries WHERE id=:id"), {"id": inquiry_id}).one() == (status, 1)
+        assert connection.execute(text("SELECT count(*) FROM operation_receipts WHERE canonical_path LIKE '%/commands'" )).scalar_one() == 0
+
+
 def _start_negotiation(expected_version: int = 1, expected_visit_versions: object = None) -> dict[str, object]:
     return {"type": "START_NEGOTIATION", "expected_version": expected_version,
             "expected_visit_versions": {} if expected_visit_versions is None else expected_visit_versions,
