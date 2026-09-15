@@ -89,6 +89,79 @@ def _response(result: object) -> dict[str, object]:
     return result.response()  # type: ignore[union-attr]
 
 
+def _start_negotiation(expected_version: int = 1, expected_visit_versions: object = None) -> dict[str, object]:
+    return {"type": "START_NEGOTIATION", "expected_version": expected_version,
+            "expected_visit_versions": {} if expected_visit_versions is None else expected_visit_versions,
+            "payload": {}}
+
+
+def test_start_negotiation_accepts_and_replays_stable_full_result(seeded: tuple[OwnerCommandService, UUID, UUID], database: Engine):
+    service, _, service_id = seeded
+    inquiry_id = _inquiry(database, service_id=service_id)
+    first = service.start_negotiation(inquiry_id, _start_negotiation(), "start-stable")
+    stored = _response(first)
+    assert stored["command_id"] == str(first.command_id)
+    assert stored["inquiry"]["status"] == "NEGOTIATING"
+    assert stored["inquiry"]["version"] == 2
+    assert stored["changed_visits"] == []
+    with database.begin() as connection:
+        connection.execute(text("UPDATE inquiries SET requester_name='Changed later' WHERE id=:id"), {"id": inquiry_id})
+    replay = service.start_negotiation(inquiry_id, _start_negotiation(), "start-stable")
+    assert replay.replay is True
+    assert _response(replay) == stored
+
+
+@pytest.mark.parametrize("status", ["NEGOTIATING", "CONFIRMED", "COMPLETED", "CANCELLED"])
+def test_start_negotiation_rejects_every_non_new_status_atomically(seeded: tuple[OwnerCommandService, UUID, UUID], database: Engine, status: str):
+    service, _, service_id = seeded
+    inquiry_id = _inquiry(database, status, service_id=service_id)
+    with pytest.raises(OwnerCommandError, match="INVALID_TRANSITION"):
+        service.start_negotiation(inquiry_id, _start_negotiation(), f"start-{status}")
+    with database.connect() as connection:
+        state = connection.execute(text("SELECT status, version FROM inquiries WHERE id=:id"), {"id": inquiry_id}).one()
+        counts = connection.execute(text("SELECT (SELECT count(*) FROM operation_receipts), (SELECT count(*) FROM change_events)" )).one()
+    assert state == (status, 1)
+    assert counts == (0, 0)
+
+
+def test_start_negotiation_rejections_are_typed_atomic_and_key_reusable(seeded: tuple[OwnerCommandService, UUID, UUID], database: Engine):
+    service, _, service_id = seeded
+    inquiry_id = _inquiry(database, service_id=service_id)
+    invalid = [_start_negotiation(expected_version=0), _start_negotiation(expected_version=2),
+               _start_negotiation(expected_visit_versions={str(uuid4()): 1}),
+               _start_negotiation(expected_visit_versions=[])]
+    for payload in invalid:
+        with pytest.raises(OwnerCommandError, match="EXPECTED_VERSION_REQUIRED|VERSION_CONFLICT"):
+            service.start_negotiation(inquiry_id, payload, "start-reusable")
+    accepted = service.start_negotiation(inquiry_id, _start_negotiation(), "start-reusable")
+    assert accepted.inquiry["version"] == 2
+    with database.connect() as connection:
+        counts = connection.execute(text("SELECT (SELECT count(*) FROM operation_receipts WHERE canonical_path LIKE :path), (SELECT count(*) FROM change_events), (SELECT count(*) FROM visit_participations), (SELECT count(*) FROM cash_notes)"), {"path": f"%{inquiry_id}/commands"}).one()
+    assert counts == (1, 1, 0, 0)
+
+
+def test_start_negotiation_links_receipt_event_and_handles_id_mismatch_expiry(seeded: tuple[OwnerCommandService, UUID, UUID], database: Engine):
+    service, owner_id, service_id = seeded
+    inquiry_id = _inquiry(database, service_id=service_id)
+    with pytest.raises(OwnerCommandError, match="NOT_FOUND"):
+        service.start_negotiation("malformed", _start_negotiation(), "start-bad-id")
+    with pytest.raises(OwnerCommandError, match="NOT_FOUND"):
+        service.start_negotiation(uuid4(), _start_negotiation(), "start-unknown")
+    first = service.start_negotiation(inquiry_id, _start_negotiation(), "start-receipt")
+    with database.connect() as connection:
+        links = connection.execute(text("""SELECT r.scope_kind, r.scope_id, r.canonical_path,
+            (SELECT count(*) FROM receipt_inquiries WHERE receipt_id=r.id), e.action,
+            (SELECT count(*) FROM event_inquiries WHERE event_id=e.id)
+            FROM operation_receipts r JOIN change_events e ON e.command_id=r.id WHERE r.id=:id"""), {"id": first.command_id}).one()
+    assert links == ("OWNER", str(owner_id), f"/api/v1/admin/inquiries/{inquiry_id}/commands", 1, "INQUIRY_NEGOTIATION_STARTED", 1)
+    with pytest.raises(OwnerCommandError, match="IDEMPOTENCY_MISMATCH"):
+        service.start_negotiation(inquiry_id, _start_negotiation(expected_version=2), "start-receipt")
+    with database.begin() as connection:
+        connection.execute(text("UPDATE operation_receipts SET result_json=NULL, tombstoned_at=now() WHERE id=:id"), {"id": first.command_id})
+    with pytest.raises(OwnerCommandError, match="RESULT_EXPIRED"):
+        service.start_negotiation(inquiry_id, _start_negotiation(), "start-receipt")
+
+
 def test_create_planned_visit_is_idempotent_and_audited(seeded: tuple[OwnerCommandService, UUID, UUID], database: Engine):
     service, owner_id, service_id = seeded
     created = service.create_planned_visit(_visit_payload(service_id), "visit-key")
