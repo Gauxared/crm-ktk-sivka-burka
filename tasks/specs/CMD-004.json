@@ -1,0 +1,26 @@
+{
+  "id": "CMD-004",
+  "title": "Complete one confirmed inquiry transactionally",
+  "type": "implementation",
+  "status": "BACKLOG",
+  "priority": "high",
+  "executor": {"preferred": "cloud", "fallback": "cloud"},
+  "reviewer": "cloud",
+  "depends_on": ["CMD-002", "CMD-003"],
+  "allowed_paths": ["apps/api/sivka_burka_api/owner_commands.py", "tests/owner_commands/**", "tasks/specs/CMD-004.json"],
+  "forbidden_paths": [".env", ".env.*", "alembic/**", "apps/api/sivka_burka_api/main.py", "apps/api/sivka_burka_api/admin_sessions.py", "apps/api/sivka_burka_api/admin_commands.py", "apps/api/sivka_burka_api/admin_inquiries.py", "apps/api/sivka_burka_api/admin_visits.py", "apps/api/sivka_burka_api/inquiries.py", "apps/web/**", "docs/**", "scripts/**", "pyproject.toml", "apps/bots/**", "packages/**"],
+  "context": ["AGENTS.md", "docs/development-pipeline.md", "docs/api.md", "docs/booking-flow.md", "docs/database.md", "apps/api/sivka_burka_api/owner_commands.py", "apps/api/sivka_burka_api/admin_inquiries.py", "tests/owner_commands/test_owner_commands_postgres.py"],
+  "requirements": [
+    "Add only transactional OwnerCommandService.complete_inquiry for accepted COMPLETE. Semantic payload exactly identifies COMPLETE and has expected_version, expected_visit_versions containing exactly the active visit id/current positive version, and payload {}. It changes only CONFIRMED to COMPLETED; marked cash facts and whether the residual payment is recorded do not gate completion.",
+    "Lock business_write_guard, target inquiry, exactly one active participation, its PLANNED visit and inquiry_terms. Require the current inquiry/visit versions. A malformed or missing inquiry is NOT_FOUND; absent/multiple active participation is PARTICIPATION_CONFLICT; non-CONFIRMED inquiry or non-PLANNED visit is INVALID_TRANSITION; missing, malformed or non-exact visit map is EXPECTED_VERSION_REQUIRED; stale versions are VERSION_CONFLICT. Rejected requests make no mutation and consume no key.",
+    "On first acceptance close exactly that participation as PROVIDED with server closed_at. Persist non-null immutable JSON snapshots: participants_snapshot exactly {participants_count:<current positive integer>}; plan_snapshot exactly {visit:{id,service_id,start_at,duration_minutes},terms:{service_option_id,participants_count,duration_minutes,total_minor,expected_prepayment_minor,currency,note}}, serializable values normalized to JSON (UUID/string and time/UTC ISO string). Do not alter historical/other participations, service terms, cash notes, notification jobs, or Visit.status.",
+    "Increment inquiry and affected visit versions, return full receipt-backed {command_id,inquiry,changed_visits:[{id,version}]}; after closing, InquiryDetail has no active participation. Write receipt/receipt_inquiries and one OWNER change_event INQUIRY_COMPLETED linked to inquiry and visit. The visit stays PLANNED for other group members; group completion remains a separate command.",
+    "Preserve owner receipt semantics: canonical /api/v1/admin/inquiries/{id}/commands, HMAC digest, exact replay with stable stored response after later projections change, changed payload IDEMPOTENCY_MISMATCH, tombstoned/malformed stored result RESULT_EXPIRED. Safe failures use OwnerCommandError only; no migration or diagnostics.",
+    "Add isolated disposable PostgreSQL tests for completed result and complete snapshots, no-payment prerequisite, exactly one active participation closure, visit stays PLANNED, version and audit links, every invalid status/visit/participation/version shape with atomicity and reusable key, stable replay/mismatch/expiry, and no changes to other group participations/cash terms. Never read local .env or configured database.",
+    "Do not add HTTP routes, visit group completion, correction, cancellation, payments, checkout, webhooks, notifications, migrations, frontend, bots, secrets or external calls."
+  ],
+  "acceptance": ["An owner command records actual service delivery for one confirmed inquiry without requiring payment completion and preserves factual participation history.", "Versions, snapshots, receipts and audit links prevent stale or partial completion while keeping the group visit open for other inquiries.", "Focused isolated PostgreSQL tests, scope and whitespace checks pass."],
+  "validation": [{"name":"CMD-004 tests","argv":["{python}","-m","pytest","tests/owner_commands","-q"],"timeout":180},{"name":"whitespace","argv":["git","diff","--check"],"timeout":10}],
+  "risk":"high", "retry_limit":0,
+  "shared_paths_approval":{"paths":["apps/api/sivka_burka_api/owner_commands.py","tests/owner_commands/**","tasks/specs/CMD-004.json"],"reviewer":"cloud:codex","reason":"Accepted narrow factual completion over existing participation history; it closes one confirmed participation without group visit closure or payment execution."}
+}
