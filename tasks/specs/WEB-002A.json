@@ -1,0 +1,34 @@
+{
+  "id": "WEB-002",
+  "title": "Build owner session bootstrap and responsive CRM shell",
+  "type": "implementation",
+  "status": "BACKLOG",
+  "priority": "high",
+  "executor": {"preferred": "cloud", "fallback": "cloud"},
+  "reviewer": "cloud",
+  "depends_on": ["AUTH-001", "AUTH-002"],
+  "allowed_paths": ["apps/web/owner/**", "tests/web002a/**", "tasks/specs/WEB-002A.json"],
+  "forbidden_paths": [".env", ".env.*", "apps/api/**", "apps/web/index.html", "apps/web/script.js", "apps/web/style.css", "apps/bots/**", "packages/**", "package.json", "package-lock.json", "node_modules/**", "docs/**", "scripts/**"],
+  "context": ["AGENTS.md", "docs/development-pipeline.md", "docs/api.md", "tasks/specs/AUTH-001.json", "tasks/specs/AUTH-002.json", "tasks/specs/WEB-001.json", "apps/web/index.html", "apps/web/script.js", "apps/web/style.css"],
+  "requirements": [
+    "Create a dependency-free owner UI under apps/web/owner/**, separate from the public landing page.",
+    "Implement login against POST /api/v1/admin/session with credentials: include, application/json and X-Requested-With: crm; keep csrf_token runtime-only and never use localStorage, sessionStorage or logs for it.",
+    "Bootstrap with GET /api/v1/admin/session using credentials: include; render the owner shell only after success. A 401 returns the login view; network and 5xx responses expose a retry state.",
+    "Implement logout with DELETE /api/v1/admin/session, credentials: include and X-CSRF-Token; clear runtime state after completion and return to login.",
+    "Provide a simple responsive Russian shell with keyboard-visible focus, labels, aria-live/alert feedback and navigation placeholders for «Заявки» and «Календарь» without implementing their data.",
+    "Add dependency-free contract/unit tests in tests/web002a/** covering endpoints, headers, credentials, runtime-only CSRF, 401/retry behavior, logout and responsive/accessibility markers. Do not add bundler, dependencies, backend route, deployment or bot code."
+  ],
+  "acceptance": [
+    "A configured owner can log in, see a responsive CRM shell, and sign out through the accepted session API.",
+    "Session and CSRF handling follows the browser contract without persistent token storage or credential leakage.",
+    "Unauthenticated and unavailable states are explicit and recoverable; placeholders do not claim implemented inquiry/calendar data.",
+    "Focused offline tests and whitespace checks pass within allowed paths."
+  ],
+  "validation": [
+    {"name": "WEB-002A contract tests", "argv": ["{python}", "-m", "unittest", "discover", "-s", "tests/web002a", "-v"], "timeout": 60},
+    {"name": "whitespace", "argv": ["git", "diff", "--check"], "timeout": 10}
+  ],
+  "risk": "high",
+  "retry_limit": 0,
+  "shared_paths_approval": {"paths": ["apps/web/owner/**", "tests/web002a/**", "tasks/specs/WEB-002A.json"], "reviewer": "cloud:codex", "reason": "Accepted narrow browser adapter for already implemented owner session routes; public landing and backend remain out of scope."}
+}
