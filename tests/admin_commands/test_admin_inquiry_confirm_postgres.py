@@ -138,6 +138,32 @@ def complete_envelope(visit_id: UUID, *, inquiry_version: int = 2, visit_version
     return {"type": "COMPLETE", "expected_version": inquiry_version, "expected_visit_versions": {str(visit_id): visit_version}, "payload": {}}
 
 
+def cancel_envelope(*, inquiry_version: int = 1, expected_visit_versions: dict[str, int] | None = None, reason: str = "Client declined") -> dict[str, object]:
+    return {"type": "CANCEL", "expected_version": inquiry_version, "expected_visit_versions": {} if expected_visit_versions is None else expected_visit_versions, "payload": {"reason": reason}}
+
+
+def test_cancel_success_and_strict_shape(database: Engine):
+    owner_id, service_id = seed(database)
+    inquiry_id = create_inquiry(database, service_id)
+    client = client_for(database)
+    csrf_token = login(client)
+    target = f"/api/v1/admin/inquiries/{inquiry_id}/commands"
+    request_headers = headers(csrf_token, "cancel-route")
+
+    malformed = client.post(target, headers=request_headers, json={**cancel_envelope(), "payload": {}})
+    assert malformed.status_code == 422
+    first = client.post(target, headers=request_headers, json=cancel_envelope())
+    assert first.status_code == 200
+    data = first.json()["data"]
+    assert data["inquiry"]["status"] == "CANCELLED"
+    assert data["inquiry"]["version"] == 2
+    assert data["changed_visits"] == []
+    replay = client.post(target, headers=request_headers, json=cancel_envelope())
+    assert replay.status_code == 200
+    assert replay.headers["Idempotent-Replay"] == "true"
+    assert replay.json() == first.json()
+
+
 def test_complete_success_without_cash_closes_participation_and_audits(database: Engine):
     owner_id, service_id = seed(database)
     inquiry_id = create_inquiry(database, service_id)
