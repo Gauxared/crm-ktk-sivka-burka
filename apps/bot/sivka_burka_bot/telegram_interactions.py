@@ -115,7 +115,8 @@ class TelegramInteractionMapper:
         if service is not None:
             catalog, ordinal = service
             return TelegramIntent(update.context, TelegramIntentKind.SELECT_SERVICE, MappingProxyType({"catalog_version": catalog, "option_ordinal": ordinal}), callback_id)
-        if data == "v1:" or data.startswith("v1:o") or data.startswith("v1:h") or data.startswith("v1:r") or data.startswith("v1:u") or data.startswith("v1:s"):
+        tokens = data.split(":")
+        if len(tokens) >= 2 and tokens[0] == "v1" and (tokens[1] == "" or tokens[1] in {"o", "h", "r", "u", "s"}):
             raise _error("MALFORMED_CALLBACK")
         raise _error("UNSUPPORTED_CALLBACK")
 
