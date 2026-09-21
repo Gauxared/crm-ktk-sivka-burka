@@ -325,7 +325,7 @@ def _render_help(result: ConversationResult, callback_id: str | None) -> Telegra
 
 
 def _render_saved(result: ConversationResult, callback_id: str | None) -> TelegramRenderedOutcome:
-    if result.adapter_metadata is not None or result.replay is not False:
+    if result.adapter_metadata is not None or type(result.replay) is not bool:
         raise _fail("INVALID_RESULT")
     _positive_version(result.draft_version)
     title, option, answers = _enriched_data(result)
@@ -388,7 +388,7 @@ class TelegramOutcomeRenderer:
             if (
                 result.data != {"reset": True}
                 or result.adapter_metadata is not None
-                or result.replay is not False
+                or type(result.replay) is not bool
             ):
                 raise _fail("INVALID_RESULT")
             _positive_version(result.draft_version)

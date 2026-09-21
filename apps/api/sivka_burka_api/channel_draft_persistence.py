@@ -286,6 +286,22 @@ class PostgresChannelDraftPort:
             return None
         return Draft(dict(row["answers"]), row["step"], int(row["version"]), row["expires_at"].isoformat())
 
+    def read_event(self, context: ChannelContext) -> Mapping[str, Any] | None:
+        """Return only an outcome marker for a committed trusted event.
+
+        This deliberately does not disclose receipt, inquiry, sender or raw event data.
+        """
+        context = validate_context(context)
+        digest = _digest(self.hmac_secret, context.event_id.encode("utf-8"))
+        with self.engine.connect() as connection:
+            row = connection.execute(text("""SELECT outcome_kind FROM channel_events
+                WHERE platform=:platform AND integration_id=:integration_id
+                  AND event_key_digest=:event_digest"""), {
+                "platform": context.platform.value, "integration_id": context.integration_id,
+                "event_digest": digest,
+            }).mappings().one_or_none()
+        return None if row is None else {"kind": str(row["outcome_kind"])}
+
     def save_draft(self, context: ChannelContext, expected_version: int, answers: Mapping[str, Any], step: str, event_id: str) -> DraftSaved:
         operation = {"kind": "SAVE", "expected_version": expected_version, "answers": dict(answers), "step": step}
         result = self._write(context, event_id, operation)
