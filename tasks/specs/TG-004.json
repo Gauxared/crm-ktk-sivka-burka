@@ -1,0 +1,74 @@
+{
+  "id": "TG-004",
+  "title": "Implement deterministic Telegram interaction protocol",
+  "type": "implementation",
+  "status": "BACKLOG",
+  "priority": "high",
+  "executor": {"preferred": "cloud", "fallback": "cloud"},
+  "reviewer": "cloud",
+  "depends_on": ["TG-003", "BOT-011"],
+  "allowed_paths": [
+    "apps/bot/sivka_burka_bot/__init__.py",
+    "apps/bot/sivka_burka_bot/telegram_interactions.py",
+    "tests/telegram_interactions/**",
+    "tasks/specs/TG-004.json"
+  ],
+  "forbidden_paths": [
+    ".env",
+    ".env.*",
+    "alembic/**",
+    "apps/api/**",
+    "apps/web/**",
+    "apps/bot/sivka_burka_bot/telegram_updates.py",
+    "packages/**",
+    "docs/**",
+    "scripts/**",
+    "config/**",
+    "pyproject.toml",
+    "tasks/specs/TG-001.json",
+    "tasks/specs/TG-002.json",
+    "tasks/specs/TG-003.json"
+  ],
+  "context": [
+    "AGENTS.md",
+    "docs/development-pipeline.md",
+    "docs/api.md",
+    "tasks/specs/TG-001.json",
+    "tasks/specs/TG-002.json",
+    "tasks/specs/TG-003.json",
+    "tasks/specs/BOT-009.json",
+    "tasks/specs/BOT-010.json",
+    "apps/bot/sivka_burka_bot/telegram_updates.py",
+    "apps/api/sivka_burka_api/channel_conversation.py"
+  ],
+  "requirements": [
+    "Add a pure TelegramInteractionMapper that accepts only an AcceptedTelegramUpdate and returns an immutable TelegramIntent carrying the exact validated ChannelContext, optional callback_query_id, a strict kind OPEN, HELP, RESET, SUBMIT, SELECT_SERVICE or TEXT_INPUT, and an immutable normalized payload. Revalidate that the context platform is TELEGRAM and reject all other objects or malformed accepted-result shapes with typed safe TelegramInteractionError codes without exposing input text.",
+    "Map complete private text commands /start, /help and /reset, with an optional syntactically valid @bot_username suffix, to OPEN, HELP and RESET. Commands are case-insensitive only in the command word; do not accept arguments, deep-link payloads, extra whitespace or lookalike prefixes as commands. Every other already-normalized non-command text becomes TEXT_INPUT with exact text preserved for later step-aware handling. A slash-prefixed unknown command returns UNSUPPORTED_COMMAND rather than becoming a name or business answer.",
+    "Define the only accepted callback_data protocol as ASCII v1:o, v1:h, v1:r, v1:u and v1:s:<catalog_version>:<option_ordinal>. Map the four fixed callbacks to OPEN, HELP, RESET and SUBMIT. For service selection require canonical decimal integers without signs or leading zeros, catalog_version in 1..2147483647 and option_ordinal in 0..2147483647; return SELECT_SERVICE with only these two integers. Reject a malformed known v1 shape as MALFORMED_CALLBACK and any unknown version/action as UNSUPPORTED_CALLBACK. Never accept a raw service_option_id, platform, sender, event or arbitrary JSON from callback data.",
+    "Preserve callback_query_id exactly so a later transport can acknowledge it. Do not call ChannelConversation, resolve catalog ordinals, parse requester/details fields, render human copy, mutate drafts, retain data, log inputs, load environment, add HTTP/SDK/persistence/delivery/retry behavior or perform external calls.",
+    "Add exhaustive pure tests for type/context/result validation, immutability, context and callback-id preservation, command cases/suffixes/unknowns/arguments/lookalikes, arbitrary text preservation, every fixed callback, canonical numeric service callbacks and every boundary/malformed/unsupported/spoof form. Copy this exact contract from primary .pipeline/TG-004-spec.json to tasks/specs/TG-004.json."
+  ],
+  "acceptance": [
+    "Authenticated normalized Telegram input is converted into a small explicit intent vocabulary without interpreting free-form business fields or trusting callback business identifiers.",
+    "Service callbacks are compact, versioned and resolvable against a future live catalog without exceeding Telegram callback limits.",
+    "Focused interaction tests, Telegram update regression, complete project tests, scope and whitespace checks pass."
+  ],
+  "validation": [
+    {"name": "Telegram interaction tests", "argv": ["{python}", "-m", "pytest", "tests/telegram_interactions", "-q"], "timeout": 120},
+    {"name": "Telegram update regression", "argv": ["{python}", "-m", "pytest", "tests/telegram_adapter", "-q"], "timeout": 120},
+    {"name": "complete tests", "argv": ["{python}", "-m", "pytest", "-q"], "timeout": 180},
+    {"name": "whitespace", "argv": ["git", "diff", "--check"], "timeout": 10}
+  ],
+  "risk": "low",
+  "retry_limit": 0,
+  "shared_paths_approval": {
+    "paths": [
+      "apps/bot/sivka_burka_bot/__init__.py",
+      "apps/bot/sivka_burka_bot/telegram_interactions.py",
+      "tests/telegram_interactions/**",
+      "tasks/specs/TG-004.json"
+    ],
+    "reviewer": "cloud:codex",
+    "reason": "Accepted pure Telegram intent protocol over the reviewed authenticated update boundary, before orchestration and network transport."
+  }
+}
