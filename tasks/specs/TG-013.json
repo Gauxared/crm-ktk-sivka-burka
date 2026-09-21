@@ -1,0 +1,47 @@
+{
+  "id": "TG-013",
+  "title": "Telegram funnel runtime repair and review submission",
+  "type": "implementation",
+  "status": "BACKLOG",
+  "priority": "high",
+  "executor": {"preferred": "cloud", "fallback": "cloud"},
+  "reviewer": "cloud",
+  "depends_on": ["TG-012"],
+  "context": ["AGENTS.md", "docs/development-pipeline.md", "docs/api.md", "docs/requirements.md", "tasks/specs/BOT-009.json", "tasks/specs/BOT-010.json", "tasks/specs/BOT-011.json", "tasks/specs/TG-009.json", "tasks/specs/TG-010.json", "tasks/specs/TG-011.json", "tasks/specs/TG-012.json", "apps/api/sivka_burka_api/channel_conversation.py", "apps/api/sivka_burka_api/public_catalog.py", "apps/bot/sivka_burka_bot/telegram_actions.py", "apps/bot/sivka_burka_bot/telegram_screen_actions.py", "apps/bot/sivka_burka_bot/telegram_conversation.py", "apps/bot/sivka_burka_bot/telegram_rendering.py"],
+  "allowed_paths": [
+    "apps/api/sivka_burka_api/channel_conversation.py",
+    "apps/bot/sivka_burka_bot/telegram_screen_actions.py",
+    "apps/bot/sivka_burka_bot/telegram_rendering.py",
+    "apps/bot/sivka_burka_bot/telegram_conversation.py",
+    "apps/bot/sivka_burka_bot/__init__.py",
+    "tests/channel_conversation/**",
+    "tests/telegram_screen_actions/**",
+    "tests/telegram_rendering/**",
+    "tests/telegram_conversation/**",
+    "tests/telegram_funnel/**",
+    "tasks/specs/TG-013.json"
+  ],
+  "forbidden_paths": [".env", ".env.*", "alembic/**", "apps/api/sivka_burka_api/channel_gateway.py", "apps/api/sivka_burka_api/channel_draft_persistence.py", "apps/api/sivka_burka_api/public_catalog.py", "apps/api/sivka_burka_api/main.py", "apps/web/**", "packages/**", "docs/**", "scripts/**", "config/**", "pyproject.toml", "apps/bot/sivka_burka_bot/telegram_updates.py", "apps/bot/sivka_burka_bot/telegram_interactions.py", "apps/bot/sivka_burka_bot/telegram_actions.py"],
+  "requirements": [
+    "Repair TG-012 against current ChannelConversation and PublicCatalogRuntime shapes: accept positive non-bool draft versions for SAVED/REQUESTER and RESET/START; accept NEGOTIATED null duration/price with RUB and FIXED_PER_PERSON positive duration, RUB money 0..9000000000000; match TelegramActionResolver active-option flattening exactly without service.active semantics.",
+    "For successful SAVED REQUESTER, DETAILS and REVIEW results, enrich data only with normalized answers and the current public catalog without changing persistence, mutations, action counts, event/version or accepted contracts. Keep catalog and answers unmutated and prove Telegram/VK equivalence.",
+    "Extend TelegramScreenActionResolver only for OPEN/DETAILS. Strictly parse exactly five Russian labelled lines for participants 1..100, ISO date, optional time, experience, and optional comment; reject whitespace/NUL/reordering/duplicates/extras safely as INVALID_DETAILS_INPUT, map to immutable SET_DETAILS, and preserve TG-010 requester behavior and orchestrator's two calls / maximum one mutation.",
+    "Render enriched SAVED REQUESTER, DETAILS and REVIEW without IDs, versions or metadata. DETAILS shows selected service and an exact copyable five-line template. REVIEW shows normalized summary and submit/reset/help buttons (v1:u, v1:r, v1:h). Preserve existing SELECT_SERVICE/HELP/RESET/ACCEPTED behavior and fail closed for unsupported combinations.",
+    "Add deterministic end-to-end tests using actual trusted Telegram mapper/action/screen/orchestrator/renderer path with a recording fake gateway. Cover full funnel, exact mutations/events/versions, malformed details, stale selection and duplicate submit. Do not add SDK, network, webhook, persistence, routes, config, docs, logging or protocol changes."
+  ],
+  "acceptance": [
+    "Focused channel, Telegram action/render/orchestrator, funnel, all Telegram, channel regression and full pytest gates pass along with git diff --check.",
+    "Self-review compares renderer input validation to actual ConversationResult and PublicCatalogRuntime shapes; diff remains within allowed paths."
+  ],
+  "validation": [
+    {"name": "channel conversation focused", "argv": ["{python}", "-m", "pytest", "tests/channel_conversation", "-q"], "timeout": 120},
+    {"name": "screen action renderer orchestrator", "argv": ["{python}", "-m", "pytest", "tests/telegram_screen_actions", "tests/telegram_rendering", "tests/telegram_conversation", "-q"], "timeout": 120},
+    {"name": "telegram funnel end to end", "argv": ["{python}", "-m", "pytest", "tests/telegram_funnel", "-q"], "timeout": 120},
+    {"name": "all Telegram suites", "argv": ["{python}", "-m", "pytest", "tests/telegram_rendering", "tests/telegram_screen_actions", "tests/telegram_conversation", "tests/telegram_funnel", "tests/telegram_interactions", "tests/telegram_actions", "tests/telegram_adapter", "-q"], "timeout": 120},
+    {"name": "channel regressions", "argv": ["{python}", "-m", "pytest", "tests/channel_gateway", "tests/channel_conversation", "-q"], "timeout": 120},
+    {"name": "full pytest", "argv": ["{python}", "-m", "pytest", "-q"], "timeout": 180},
+    {"name": "whitespace", "argv": ["git", "diff", "--check"], "timeout": 10}
+  ],
+  "risk": "high",
+  "retry_limit": 0
+}
