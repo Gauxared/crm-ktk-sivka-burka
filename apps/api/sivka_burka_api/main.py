@@ -24,6 +24,8 @@ from .admin_inquiries import AdminInquiryReadRuntime, AdminInquiryReader, Invali
 from .admin_visits import AdminVisitReadRuntime, AdminVisitReader, InvalidVisitCursor
 from .owner_commands import IdempotencyMismatch as OwnerIdempotencyMismatch, OwnerCommandError
 from .settings import load_settings
+from apps.bot.sivka_burka_bot.telegram_runtime import TelegramWebhookError, TelegramWebhookRuntime
+from apps.bot.sivka_burka_bot.telegram_transport import TelegramTransportError
 
 
 _NO_STORE = {"Cache-Control": "no-store"}
@@ -86,7 +88,7 @@ def _map_command_error(error: InquiryCommandError) -> JSONResponse:
     return _error("INVALID_REQUEST", 400)
 
 
-def create_app(*, public_submission_runtime: PublicSubmissionRuntime | None = None, public_catalog_runtime: PublicCatalogRuntime | None = None, admin_session_runtime: AdminSessionRuntime | None = None, admin_command_runtime: AdminCommandRuntime | None = None, admin_inquiry_read_runtime: AdminInquiryReadRuntime | None = None, admin_visit_read_runtime: AdminVisitReadRuntime | None = None) -> FastAPI:
+def create_app(*, public_submission_runtime: PublicSubmissionRuntime | None = None, public_catalog_runtime: PublicCatalogRuntime | None = None, admin_session_runtime: AdminSessionRuntime | None = None, admin_command_runtime: AdminCommandRuntime | None = None, admin_inquiry_read_runtime: AdminInquiryReadRuntime | None = None, admin_visit_read_runtime: AdminVisitReadRuntime | None = None, telegram_webhook_runtime: TelegramWebhookRuntime | None = None) -> FastAPI:
     settings = load_settings()
     app = FastAPI(title="Sivka-Burka API", version="0.1.0")
 
@@ -94,6 +96,30 @@ def create_app(*, public_submission_runtime: PublicSubmissionRuntime | None = No
     def health() -> dict[str, str]:
         """Report process liveness only; this endpoint intentionally does not touch PostgreSQL."""
         return {"status": "ok", "service": "sivka-burka-api", "environment": settings.environment}
+
+    @app.post("/api/v1/integrations/telegram/webhook", tags=["integrations"])
+    async def telegram_webhook(request: Request) -> JSONResponse:
+        if telegram_webhook_runtime is None:
+            return _error("TELEGRAM_WEBHOOK_UNAVAILABLE", 503)
+        if request.headers.get("content-type", "").split(";", 1)[0].strip().lower() != "application/json":
+            return _error("UNSUPPORTED_MEDIA_TYPE", 415)
+        try:
+            raw = await request.body()
+            if len(raw) > 256 * 1024:
+                return _error("REQUEST_TOO_LARGE", 413)
+            payload = json.loads(raw)
+            if not isinstance(payload, dict):
+                return _error("INVALID_REQUEST", 400)
+            delivered = await telegram_webhook_runtime.handle(
+                request.headers.get("X-Telegram-Bot-Api-Secret-Token"), payload
+            )
+        except TelegramWebhookError as error:
+            return _error("UNAUTHORIZED" if error.code == "UNAUTHORIZED" else "INVALID_REQUEST", 401 if error.code == "UNAUTHORIZED" else 400)
+        except TelegramTransportError as error:
+            return _error("RATE_LIMITED" if error.code == "RATE_LIMITED" else "TELEGRAM_TEMPORARY_FAILURE", 503)
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            return _error("INVALID_REQUEST", 400)
+        return JSONResponse({"data": {"accepted": delivered}}, headers=_NO_STORE)
 
     @app.get("/api/v1/public/catalog", tags=["public"])
     def public_catalog() -> JSONResponse:

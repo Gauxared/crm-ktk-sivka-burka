@@ -79,6 +79,7 @@ class ChannelPort(Protocol):
     def save_draft(self, context: ChannelContext, expected_version: int, answers: Mapping[str, Any], step: str, event_id: str) -> DraftSaved: ...
     def submit_inquiry(self, context: ChannelContext, fields: Mapping[str, Any], draft_version: int, submit_event_id: str) -> InquiryReceipt: ...
     def reset_draft(self, context: ChannelContext, expected_version: int, event_id: str) -> ResetResult: ...
+    def read_event(self, context: ChannelContext) -> Mapping[str, Any] | None: ...
 
 
 _ID_FIELDS = frozenset({"integration_id", "external_sender_id", "conversation_id", "event_id"})
@@ -224,3 +225,14 @@ class ChannelGateway:
         if event_id != context.event_id:
             raise GatewayError("INVALID_EVENT")
         return self._port.reset_draft(context, expected_version, event_id)
+
+    def read_event(self, context: ChannelContext) -> Mapping[str, Any] | None:
+        """Read a privacy-preserving committed-event marker, if the port supports it."""
+        context = validate_context(context)
+        reader = getattr(self._port, "read_event", None)
+        if not callable(reader):
+            return None
+        result = reader(context)
+        if result is not None and (not isinstance(result, Mapping) or result.get("kind") not in {"SAVE", "RESET", "SUBMIT"}):
+            raise GatewayError("INVALID_EVENT_RECEIPT")
+        return result

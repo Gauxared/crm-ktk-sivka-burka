@@ -63,6 +63,9 @@ class TelegramConversationOrchestrator:
     def handle(self, update: AcceptedTelegramUpdate) -> TelegramConversationOutcome:
         intent = self._mapper.map(update)
         context = intent.context
+        replay = self._replay(context, intent.callback_query_id)
+        if replay is not None:
+            return replay
         if intent.kind is TelegramIntentKind.SELECT_SERVICE:
             preflight = self._conversation.handle(context, _empty_action())
             catalog = self._catalog(preflight)
@@ -79,6 +82,29 @@ class TelegramConversationOrchestrator:
         action = self._resolver.resolve(intent, None)
         result = self._conversation.handle(context, action)
         return TelegramConversationOutcome(result, intent.callback_query_id)
+
+    def _replay(self, context: Any, callback_query_id: str | None) -> TelegramConversationOutcome | None:
+        gateway = getattr(self._conversation, "_gateway")
+        reader = getattr(gateway, "read_event", None)
+        if not callable(reader):
+            return None
+        event = reader(context)
+        if event is None:
+            return None
+        kind = event["kind"]
+        if kind == "SUBMIT":
+            return TelegramConversationOutcome(ConversationResult(
+                "ACCEPTED_UNCONFIRMED", "ACCEPTED_UNCONFIRMED",
+                {"semantic_code": "INQUIRY_ACCEPTED_UNCONFIRMED"}, replay=True,
+            ), callback_query_id)
+        if kind == "RESET":
+            return TelegramConversationOutcome(ConversationResult("RESET", "START", {"reset": True}, 1, replay=True), callback_query_id)
+        draft = gateway.read_draft(context).draft
+        if draft is None:
+            return TelegramConversationOutcome(ConversationResult("RESET", "START", {"reset": True}, 1, replay=True), callback_query_id)
+        return TelegramConversationOutcome(ConversationResult(
+            "SAVED", draft.step, {"catalog": gateway.read_catalog(context).catalog, "answers": dict(draft.answers)}, draft.version, replay=True,
+        ), callback_query_id)
 
     @staticmethod
     def _catalog(result: ConversationResult) -> Mapping[str, Any]:
