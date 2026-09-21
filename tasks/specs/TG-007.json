@@ -1,0 +1,78 @@
+{
+  "id": "TG-007",
+  "title": "Resolve Telegram intents against the live catalog",
+  "type": "implementation",
+  "status": "BACKLOG",
+  "priority": "high",
+  "executor": {"preferred": "cloud", "fallback": "cloud"},
+  "reviewer": "cloud",
+  "depends_on": ["TG-006", "BOT-011"],
+  "allowed_paths": [
+    "apps/bot/sivka_burka_bot/__init__.py",
+    "apps/bot/sivka_burka_bot/telegram_actions.py",
+    "tests/telegram_actions/**",
+    "tasks/specs/TG-007.json"
+  ],
+  "forbidden_paths": [
+    ".env",
+    ".env.*",
+    "alembic/**",
+    "apps/api/**",
+    "apps/web/**",
+    "apps/bot/sivka_burka_bot/telegram_updates.py",
+    "apps/bot/sivka_burka_bot/telegram_interactions.py",
+    "packages/**",
+    "docs/**",
+    "scripts/**",
+    "config/**",
+    "pyproject.toml",
+    "tasks/specs/TG-001.json",
+    "tasks/specs/TG-002.json",
+    "tasks/specs/TG-003.json",
+    "tasks/specs/TG-004.json",
+    "tasks/specs/TG-005.json",
+    "tasks/specs/TG-006.json"
+  ],
+  "context": [
+    "AGENTS.md",
+    "docs/development-pipeline.md",
+    "docs/api.md",
+    "tasks/specs/TG-004.json",
+    "tasks/specs/TG-005.json",
+    "tasks/specs/TG-006.json",
+    "tasks/specs/BOT-009.json",
+    "tasks/specs/BOT-010.json",
+    "apps/bot/sivka_burka_bot/telegram_interactions.py",
+    "apps/api/sivka_burka_api/channel_conversation.py"
+  ],
+  "requirements": [
+    "Add a pure TelegramActionResolver that accepts only an exact validated TelegramIntent and returns a ChannelAction. Revalidate TELEGRAM ChannelContext and exact intent shapes. OPEN, HELP, RESET and SUBMIT require an empty immutable payload and map directly to the same ChannelAction. TEXT_INPUT never maps speculatively and returns a safe typed TelegramActionError with code SCREEN_REQUIRED.",
+    "Resolve SELECT_SERVICE only from its exact integer payload catalog_version and option_ordinal and an explicit live catalog mapping. Validate non-boolean catalog_version in 1..2147483647, services as a list, every service as a mapping with an options list, every option active marker as absent/True/False, and every active option id as a normalized non-empty string of at most 100 characters. Reject duplicate active option ids and malformed catalog shapes as CATALOG_UNAVAILABLE without returning catalog data.",
+    "Flatten active options in the exact service and option order received. Require the live catalog_version to equal the callback version or return STALE_CATALOG. Resolve zero-based option_ordinal only within that active list or return UNKNOWN_SERVICE_SELECTION. Return ChannelAction SELECT_SERVICE with only service_option_id; never trust or pass catalog version, ordinal, raw callback, price, status, sender or other catalog fields into the action.",
+    "TelegramActionError str/repr is stable and contains no intent payload, option id, catalog data or trusted identifiers. The resolver is deterministic and side-effect free: it does not call ChannelConversation/Gateway, mutate catalog, retain data, render copy, load environment, log, access HTTP/SDK/persistence or perform delivery/retry/external calls.",
+    "Add direct exhaustive pure tests for wrong intent/exact type/context/kind and forged payloads; every direct mapping; TEXT_INPUT rejection; catalog/version/structure/active/id/duplicate failures; stable ordered flattening with inactive options; ordinal/version boundaries; immutable inputs; output exactness; safe errors and zero side effects. Copy this exact contract from primary .pipeline/TG-007-spec.json to tasks/specs/TG-007.json."
+  ],
+  "acceptance": [
+    "Only an intent resolved against the matching current catalog can select a concrete service option; stale or malformed callbacks cannot choose another option.",
+    "Direct commands become strict ChannelAction values while free text remains explicitly deferred to screen-aware handling.",
+    "Focused resolver tests, interaction/update regressions, complete project tests, scope and whitespace checks pass."
+  ],
+  "validation": [
+    {"name": "Telegram action tests", "argv": ["{python}", "-m", "pytest", "tests/telegram_actions", "-q"], "timeout": 120},
+    {"name": "Telegram interaction regression", "argv": ["{python}", "-m", "pytest", "tests/telegram_interactions", "tests/telegram_adapter", "-q"], "timeout": 120},
+    {"name": "complete tests", "argv": ["{python}", "-m", "pytest", "-q"], "timeout": 180},
+    {"name": "whitespace", "argv": ["git", "diff", "--check"], "timeout": 10}
+  ],
+  "risk": "medium",
+  "retry_limit": 0,
+  "shared_paths_approval": {
+    "paths": [
+      "apps/bot/sivka_burka_bot/__init__.py",
+      "apps/bot/sivka_burka_bot/telegram_actions.py",
+      "tests/telegram_actions/**",
+      "tasks/specs/TG-007.json"
+    ],
+    "reviewer": "cloud:codex",
+    "reason": "Accepted pure catalog resolver between the reviewed Telegram intent protocol and shared conversation actions."
+  }
+}
