@@ -87,8 +87,25 @@ def test_all_experience_variants_and_platforms_have_the_same_ungated_flow(experi
     flow.handle(context(platform), act("SET_REQUESTER", name="Ann", contact={"kind": "VK", "value": "custom"}))
     result = flow.handle(context(platform), act("SET_DETAILS", participants_count=1, requested_time={"date": "2026-10-01"}, experience=experience))
     assert result.screen == "REVIEW"
+    assert result.data["catalog"] == CATALOG
+    assert result.data["answers"] == port.mutations[-1][2]
     assert "admission" not in port.mutations[-1][2]
     assert len(port.mutations) == 3
+
+
+def test_saved_results_enrich_output_without_persisting_catalog():
+    flow, port = service()
+    requester = flow.handle(context(), act("SELECT_SERVICE", service_option_id=OPTION))
+    details = flow.handle(context(), act("SET_REQUESTER", name="Ann"))
+    review = flow.handle(
+        context(),
+        act("SET_DETAILS", participants_count=1, requested_time={"date": "2026-10-01"}),
+    )
+
+    for result in (requester, details, review):
+        assert set(result.data) == {"catalog", "answers"}
+        assert result.data["catalog"] == CATALOG
+    assert all("catalog" not in mutation[2] for mutation in port.mutations)
 
 
 def test_omitted_contact_is_not_filled_from_trusted_sender():

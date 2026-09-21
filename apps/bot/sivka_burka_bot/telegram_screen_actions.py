@@ -63,7 +63,7 @@ def _text(value: Any) -> str:
     return value
 
 
-def _details_text(value: Any) -> str:
+def _details_text(value: Any) -> dict[str, Any]:
     if not isinstance(value, str) or not value or value.strip() != value or "\x00" in value:
         raise _error("INVALID_DETAILS_INPUT")
     lines = value.split("\n")
@@ -77,7 +77,13 @@ def _details_text(value: Any) -> str:
             raise _error("INVALID_DETAILS_INPUT")
         values.append(line[len(prefix):])
     participants, requested_date, time_text, experience, comment = values
-    if not participants.isascii() or not participants.isdecimal() or str(int(participants)) != participants or not 1 <= int(participants) <= 100:
+    if (
+        not participants.isascii()
+        or not participants.isdecimal()
+        or len(participants) > 3
+        or str(int(participants)) != participants
+        or not 1 <= int(participants) <= 100
+    ):
         raise _error("INVALID_DETAILS_INPUT")
     try:
         normalized_date = date.fromisoformat(requested_date).isoformat()
@@ -101,7 +107,12 @@ def _details_text(value: Any) -> str:
         raise _error("INVALID_DETAILS_INPUT")
     else:
         normalized_comment = comment
-    return {"participants_count": int(participants), "requested_time": {"date": normalized_date, "time_text": normalized_time}, "experience": experiences[normalized_experience], "comment": normalized_comment}
+    return {
+        "participants_count": int(participants),
+        "requested_time": {"date": normalized_date, "time_text": normalized_time},
+        "experience": experiences[normalized_experience],
+        "comment": normalized_comment,
+    }
 
 
 def _requester_preflight(value: Any) -> None:
@@ -126,20 +137,63 @@ def _requester_preflight(value: Any) -> None:
 
 
 def _details_preflight(value: Any) -> None:
-    if type(value) is not ConversationResult or value.kind != "OPEN" or value.screen != "DETAILS" or value.adapter_metadata is not None or value.replay is not False:
+    if type(value) is not ConversationResult:
+        raise _error("INVALID_SCREEN_RESULT")
+    if value.screen != "DETAILS":
         raise _error("SCREEN_INPUT_UNSUPPORTED")
+    if value.kind != "OPEN" or value.adapter_metadata is not None or value.replay is not False:
+        raise _error("INVALID_SCREEN_RESULT")
     if isinstance(value.draft_version, bool) or not isinstance(value.draft_version, int) or value.draft_version < 1:
         raise _error("INVALID_SCREEN_RESULT")
-    if not isinstance(value.data, Mapping) or set(value.data) != {"catalog", "answers"} or not isinstance(value.data.get("catalog"), Mapping):
+    if (
+        not isinstance(value.data, Mapping)
+        or set(value.data) != {"catalog", "answers"}
+        or not isinstance(value.data.get("catalog"), Mapping)
+    ):
         raise _error("INVALID_SCREEN_RESULT")
     answers = value.data.get("answers")
-    if not isinstance(answers, Mapping) or set(answers) not in ({"service_option_id", "requester"}, {"service_option_id", "requester"}):
+    if not isinstance(answers, Mapping) or set(answers) != {"service_option_id", "requester"}:
         raise _error("INVALID_SCREEN_RESULT")
+    option_id = answers.get("service_option_id")
+    if (
+        not isinstance(option_id, str)
+        or not option_id
+        or option_id != option_id.strip()
+        or len(option_id) > 100
+        or "\x00" in option_id
+    ):
+        raise _error("INVALID_SCREEN_RESULT")
+    requester = answers.get("requester")
+    if not isinstance(requester, Mapping) or set(requester) not in ({"name"}, {"name", "contact"}):
+        raise _error("INVALID_SCREEN_RESULT")
+    name = requester.get("name")
+    if (
+        not isinstance(name, str)
+        or not name
+        or name != name.strip()
+        or len(name) > 200
+        or "\x00" in name
+    ):
+        raise _error("INVALID_SCREEN_RESULT")
+    if "contact" in requester:
+        contact = requester["contact"]
+        if not isinstance(contact, Mapping) or set(contact) != {"kind", "value"}:
+            raise _error("INVALID_SCREEN_RESULT")
+        contact_value = contact.get("value")
+        if (
+            contact.get("kind") not in {"PHONE", "TELEGRAM", "VK"}
+            or not isinstance(contact_value, str)
+            or not contact_value
+            or contact_value != contact_value.strip()
+            or len(contact_value) > 300
+            or "\x00" in contact_value
+        ):
+            raise _error("INVALID_SCREEN_RESULT")
 
 
 @dataclass(frozen=True, slots=True)
 class TelegramScreenActionResolver:
-    """Resolve one mapper-produced text input for the REQUESTER screen only."""
+    """Resolve mapper-produced text for the supported conversation screen."""
 
     def resolve(self, intent: TelegramIntent, preflight: ConversationResult) -> ChannelAction:
         intent = _intent(intent)
