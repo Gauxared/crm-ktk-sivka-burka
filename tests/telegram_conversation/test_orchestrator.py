@@ -114,10 +114,10 @@ def test_text_input_preserves_screen_required_error_and_never_calls_conversation
 
 
 def test_text_input_unsupported_screen_stops_after_preflight():
-    orchestrator, calls = harness([ConversationResult("OPEN", "DETAILS", {"catalog": CATALOG, "answers": {"service_option_id": "ride"}}, 1)])
+    orchestrator, calls = harness([ConversationResult("OPEN", "DETAILS", {"catalog": CATALOG, "answers": {"service_option_id": "ride", "requester": {"name": "Alice"}}}, 1)])
     with pytest.raises(Exception) as raised:
         orchestrator.handle(update(text="some free text"))
-    assert raised.value.code == "SCREEN_INPUT_UNSUPPORTED"
+    assert raised.value.code == "INVALID_DETAILS_INPUT"
     assert len(calls) == 1
 
 
