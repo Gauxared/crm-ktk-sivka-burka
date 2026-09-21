@@ -7,7 +7,7 @@ from enum import Enum
 from types import MappingProxyType
 from typing import Any, Mapping
 
-from apps.api.sivka_burka_api.channel_gateway import ChannelContext, Platform, validate_context
+from apps.api.sivka_burka_api.channel_gateway import ChannelContext, GatewayError, Platform, validate_context
 from .telegram_updates import AcceptedTelegramUpdate, InputKind
 
 
@@ -35,8 +35,9 @@ class TelegramIntent:
 
 
 _COMMAND = re.compile(r"^/(start|help|reset)(?:@[A-Za-z0-9_]{1,32})?$", re.IGNORECASE)
-_CALLBACK = re.compile(r"^v1:([o h r u s])$".replace(" ", ""))
-_SERVICE = re.compile(r"^v1:s:([0-9]+):([0-9]+)$")
+_FIXED_CALLBACK = re.compile(r"^v1:([ohru])$")
+_SERVICE_CALLBACK = re.compile(r"^v1:s:([1-9][0-9]*):(0|[1-9][0-9]*)$")
+_MAX_PROTOCOL_INTEGER = 2_147_483_647
 
 
 def _error(code: str) -> TelegramInteractionError:
@@ -48,19 +49,45 @@ def _valid(update: Any) -> AcceptedTelegramUpdate:
         raise _error("INVALID_UPDATE")
     try:
         context = validate_context(update.context)
-    except Exception:
+    except GatewayError:
         raise _error("INVALID_CONTEXT") from None
     if context.platform is not Platform.TELEGRAM:
         raise _error("INVALID_CONTEXT")
     if update.input_kind is InputKind.TEXT:
-        if not isinstance(update.text, str) or update.data is not None:
+        if (
+            not isinstance(update.text, str)
+            or not update.text
+            or update.text.strip() != update.text
+            or len(update.text) > 4096
+            or update.data is not None
+            or update.callback_query_id is not None
+        ):
             raise _error("MALFORMED_UPDATE")
     elif update.input_kind is InputKind.CALLBACK:
-        if not isinstance(update.data, str) or update.text is not None or not isinstance(update.callback_query_id, str):
+        if (
+            update.text is not None
+            or not isinstance(update.data, str)
+            or not update.data
+            or len(update.data.encode("utf-8")) > 64
+            or not isinstance(update.callback_query_id, str)
+            or not update.callback_query_id
+            or update.callback_query_id.strip() != update.callback_query_id
+            or len(update.callback_query_id) > 256
+        ):
             raise _error("MALFORMED_UPDATE")
     else:
         raise _error("MALFORMED_UPDATE")
     return update
+
+
+def _service_values(data: str) -> tuple[int, int] | None:
+    match = _SERVICE_CALLBACK.fullmatch(data)
+    if match is None:
+        return None
+    catalog, ordinal = (int(value) for value in match.groups())
+    if catalog > _MAX_PROTOCOL_INTEGER or ordinal > _MAX_PROTOCOL_INTEGER:
+        return None
+    return catalog, ordinal
 
 
 class TelegramInteractionMapper:
@@ -80,17 +107,15 @@ class TelegramInteractionMapper:
         data = update.data
         callback_id = update.callback_query_id
         assert data is not None and callback_id is not None
-        fixed = _CALLBACK.fullmatch(data)
+        fixed = _FIXED_CALLBACK.fullmatch(data)
         if fixed:
             kind = {"o": TelegramIntentKind.OPEN, "h": TelegramIntentKind.HELP, "r": TelegramIntentKind.RESET, "u": TelegramIntentKind.SUBMIT}[fixed.group(1)]
             return TelegramIntent(update.context, kind, MappingProxyType({}), callback_id)
-        service = _SERVICE.fullmatch(data)
-        if service:
-            catalog, ordinal = (int(value) for value in service.groups())
-            if not 1 <= catalog <= 2147483647 or not 0 <= ordinal <= 2147483647:
-                raise _error("MALFORMED_CALLBACK")
+        service = _service_values(data)
+        if service is not None:
+            catalog, ordinal = service
             return TelegramIntent(update.context, TelegramIntentKind.SELECT_SERVICE, MappingProxyType({"catalog_version": catalog, "option_ordinal": ordinal}), callback_id)
-        if data.startswith("v1:"):
+        if data == "v1:" or data.startswith("v1:o") or data.startswith("v1:h") or data.startswith("v1:r") or data.startswith("v1:u") or data.startswith("v1:s"):
             raise _error("MALFORMED_CALLBACK")
         raise _error("UNSUPPORTED_CALLBACK")
 
