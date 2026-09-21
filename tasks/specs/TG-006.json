@@ -1,0 +1,68 @@
+{
+  "id": "TG-006",
+  "title": "Fix Telegram callback action-token classification",
+  "type": "implementation",
+  "status": "BACKLOG",
+  "priority": "high",
+  "executor": {"preferred": "cloud", "fallback": "cloud"},
+  "reviewer": "cloud",
+  "depends_on": ["TG-005"],
+  "allowed_paths": [
+    "apps/bot/sivka_burka_bot/telegram_interactions.py",
+    "tests/telegram_interactions/**",
+    "tasks/specs/TG-006.json"
+  ],
+  "forbidden_paths": [
+    ".env",
+    ".env.*",
+    "alembic/**",
+    "apps/api/**",
+    "apps/web/**",
+    "apps/bot/sivka_burka_bot/__init__.py",
+    "apps/bot/sivka_burka_bot/telegram_updates.py",
+    "packages/**",
+    "docs/**",
+    "scripts/**",
+    "config/**",
+    "pyproject.toml",
+    "tasks/specs/TG-001.json",
+    "tasks/specs/TG-002.json",
+    "tasks/specs/TG-003.json",
+    "tasks/specs/TG-004.json",
+    "tasks/specs/TG-005.json"
+  ],
+  "context": [
+    "AGENTS.md",
+    "docs/development-pipeline.md",
+    "tasks/specs/TG-004.json",
+    "tasks/specs/TG-005.json",
+    "apps/bot/sivka_burka_bot/telegram_interactions.py",
+    "tests/telegram_interactions/test_mapper.py"
+  ],
+  "requirements": [
+    "Classify callback action by the complete colon-delimited token after v1:, never by string prefix. Only exact action tokens o, h, r, u and s are known. A known token with missing or extra fields remains MALFORMED_CALLBACK; an empty token remains MALFORMED_CALLBACK. Any other complete token, including other, help, reset, submit, service, oops, h2, r0, u_ and x with or without following fields, is UNSUPPORTED_CALLBACK. Unknown protocol versions remain UNSUPPORTED_CALLBACK.",
+    "Keep all TG-005 validation, canonical service parsing, immutability and safe errors unchanged. Add direct parameterized regression assertions for every unknown token sharing a valid token's first character, known-token malformed forms, empty token and unknown versions. Prove no KeyError or other implementation exception escapes.",
+    "Copy this exact contract from primary .pipeline/TG-006-spec.json to tasks/specs/TG-006.json. Do not change any other behavior or add conversation, catalog resolution, transport, copy, HTTP, SDK, persistence, environment, logging, delivery, retry or external calls."
+  ],
+  "acceptance": [
+    "Callback classification follows complete grammar tokens, so unknown actions cannot be mislabeled based on their first character.",
+    "All focused interaction, Telegram update regression, complete project, scope and whitespace checks pass."
+  ],
+  "validation": [
+    {"name": "Telegram interaction tests", "argv": ["{python}", "-m", "pytest", "tests/telegram_interactions", "-q"], "timeout": 120},
+    {"name": "Telegram update regression", "argv": ["{python}", "-m", "pytest", "tests/telegram_adapter", "-q"], "timeout": 120},
+    {"name": "complete tests", "argv": ["{python}", "-m", "pytest", "-q"], "timeout": 180},
+    {"name": "whitespace", "argv": ["git", "diff", "--check"], "timeout": 10}
+  ],
+  "risk": "low",
+  "retry_limit": 0,
+  "shared_paths_approval": {
+    "paths": [
+      "apps/bot/sivka_burka_bot/telegram_interactions.py",
+      "tests/telegram_interactions/**",
+      "tasks/specs/TG-006.json"
+    ],
+    "reviewer": "cloud:codex",
+    "reason": "Narrow grammar repair required before the Telegram intent protocol can be used by orchestration."
+  }
+}

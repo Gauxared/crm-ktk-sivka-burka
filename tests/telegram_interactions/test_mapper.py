@@ -89,6 +89,9 @@ def test_all_fixed_callbacks_preserve_callback_id(data, kind):
 @pytest.mark.parametrize(("data", "code"), [
     ("v1:s", "MALFORMED_CALLBACK"), ("v1:s:", "MALFORMED_CALLBACK"), ("v1:s:1", "MALFORMED_CALLBACK"), ("v1:s:1:0:0", "MALFORMED_CALLBACK"),
     ("v1:o:1", "MALFORMED_CALLBACK"), ("v1:h:", "MALFORMED_CALLBACK"), ("v1:r:x", "MALFORMED_CALLBACK"), ("v1:u:0", "MALFORMED_CALLBACK"), ("v1:", "MALFORMED_CALLBACK"),
+    ("v1:other", "UNSUPPORTED_CALLBACK"), ("v1:help", "UNSUPPORTED_CALLBACK"), ("v1:reset", "UNSUPPORTED_CALLBACK"),
+    ("v1:submit", "UNSUPPORTED_CALLBACK"), ("v1:service", "UNSUPPORTED_CALLBACK"), ("v1:oops", "UNSUPPORTED_CALLBACK"),
+    ("v1:h2", "UNSUPPORTED_CALLBACK"), ("v1:r0", "UNSUPPORTED_CALLBACK"), ("v1:u_", "UNSUPPORTED_CALLBACK"),
     ("v1:x", "UNSUPPORTED_CALLBACK"), ("v1:x:1:0", "UNSUPPORTED_CALLBACK"), ("v2:o", "UNSUPPORTED_CALLBACK"),
     ("service-id", "UNSUPPORTED_CALLBACK"), ('{"catalog_version":1}', "UNSUPPORTED_CALLBACK"), ("v1:s:service-id:0", "MALFORMED_CALLBACK"),
 ])
