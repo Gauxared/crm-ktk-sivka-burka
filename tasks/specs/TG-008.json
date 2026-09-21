@@ -1,0 +1,77 @@
+{
+  "id": "TG-008",
+  "title": "Repair Telegram catalog resolver integration contract",
+  "type": "implementation",
+  "status": "BACKLOG",
+  "priority": "high",
+  "executor": {"preferred": "cloud", "fallback": "cloud"},
+  "reviewer": "cloud",
+  "depends_on": ["TG-007"],
+  "allowed_paths": [
+    "apps/bot/sivka_burka_bot/telegram_actions.py",
+    "tests/telegram_actions/**",
+    "tasks/specs/TG-008.json"
+  ],
+  "forbidden_paths": [
+    ".env",
+    ".env.*",
+    "alembic/**",
+    "apps/api/**",
+    "apps/web/**",
+    "apps/bot/sivka_burka_bot/__init__.py",
+    "apps/bot/sivka_burka_bot/telegram_updates.py",
+    "apps/bot/sivka_burka_bot/telegram_interactions.py",
+    "packages/**",
+    "docs/**",
+    "scripts/**",
+    "config/**",
+    "pyproject.toml",
+    "tasks/specs/TG-001.json",
+    "tasks/specs/TG-002.json",
+    "tasks/specs/TG-003.json",
+    "tasks/specs/TG-004.json",
+    "tasks/specs/TG-005.json",
+    "tasks/specs/TG-006.json",
+    "tasks/specs/TG-007.json"
+  ],
+  "context": [
+    "AGENTS.md",
+    "docs/development-pipeline.md",
+    "docs/api.md",
+    "tasks/specs/TG-007.json",
+    "apps/api/sivka_burka_api/public_catalog.py",
+    "apps/api/sivka_burka_api/channel_draft_persistence.py",
+    "apps/bot/sivka_burka_bot/telegram_interactions.py",
+    "apps/bot/sivka_burka_bot/telegram_actions.py",
+    "tests/channel_gateway/test_channel_draft_persistence_postgres.py",
+    "tests/telegram_actions/test_resolver.py"
+  ],
+  "requirements": [
+    "Repair the resolver to consume the actual reviewed ReadCatalog projection key catalog_version, never the invented key version. Require catalog_version as a non-boolean integer in 1..2147483647 and keep every existing catalog/service/option validation. A mapping with only version must return CATALOG_UNAVAILABLE. Add a realistic synthetic projection matching PublicCatalogRuntime output, including catalog_version, club_timezone, contact_info, location_link, visit_rules and services, and prove service resolution against it.",
+    "Treat TelegramIntent as untrusted construction. Require its payload to be the exact immutable mappingproxy type produced by TelegramInteractionMapper. Direct OPEN/HELP/RESET/SUBMIT require empty payload. TEXT_INPUT requires exactly {text} with normalized non-empty string up to 4096 characters and callback_query_id absent, then returns SCREEN_REQUIRED. SELECT_SERVICE requires exact numeric payload plus a present normalized callback_query_id and matching live catalog. Reject mutable mappings, malformed text payloads, SELECT_SERVICE without callback id, extra/missing fields and inconsistent shapes as INVALID_INTENT before reading the catalog.",
+    "Preserve all TG-007 safe error, ordering, active option, duplicate, ordinal, version, non-mutation and exact ChannelAction behavior. Add direct tests for the actual catalog_version projection, wrong legacy version key, mutable/forged payloads, valid and malformed TEXT_INPUT, SELECT_SERVICE callback-id presence, and proof invalid intents do not touch an exploding catalog mapping.",
+    "Copy this exact contract from primary .pipeline/TG-008-spec.json to tasks/specs/TG-008.json. Do not modify API/catalog producers, call Gateway/Conversation, or add copy, transport, HTTP, SDK, persistence, environment, logging, delivery, retry or external behavior."
+  ],
+  "acceptance": [
+    "A service callback resolves against the actual ReadCatalog representation and rejects stale, malformed or forged intent/catalog input before action dispatch.",
+    "Only immutable mapper-produced intent shapes cross into ChannelAction resolution.",
+    "Focused resolver tests, interaction/update regressions, complete project tests, scope and whitespace checks pass."
+  ],
+  "validation": [
+    {"name": "Telegram action tests", "argv": ["{python}", "-m", "pytest", "tests/telegram_actions", "-q"], "timeout": 120},
+    {"name": "Telegram interaction regression", "argv": ["{python}", "-m", "pytest", "tests/telegram_interactions", "tests/telegram_adapter", "-q"], "timeout": 120},
+    {"name": "complete tests", "argv": ["{python}", "-m", "pytest", "-q"], "timeout": 180},
+    {"name": "whitespace", "argv": ["git", "diff", "--check"], "timeout": 10}
+  ],
+  "risk": "medium",
+  "retry_limit": 0,
+  "shared_paths_approval": {
+    "paths": [
+      "apps/bot/sivka_burka_bot/telegram_actions.py",
+      "tests/telegram_actions/**",
+      "tasks/specs/TG-008.json"
+    ],
+    "reviewer": "cloud:codex",
+    "reason": "Required integration and trust-shape repair before the catalog resolver can drive the shared conversation."
+  }
+}
