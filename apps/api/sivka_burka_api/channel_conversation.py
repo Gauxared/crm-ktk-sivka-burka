@@ -145,14 +145,14 @@ class ChannelConversation:
                 raise GatewayError("INVALID_TRANSITION")
             receipt = self._gateway.submit_inquiry(context, fields=answers, draft_version=draft.version, submit_event_id=context.event_id)
             return ConversationResult("ACCEPTED_UNCONFIRMED", "ACCEPTED_UNCONFIRMED", {"semantic_code": "INQUIRY_ACCEPTED_UNCONFIRMED"}, adapter_metadata={"receipt_id": receipt.receipt_id, "inquiry_id": receipt.inquiry_id}, replay=receipt.replay)
-        return self._save(context, options, draft, answers, action)
+        return self._save(context, catalog, options, draft, answers, action)
 
     def _open(self, catalog: Mapping[str, Any], draft: Draft | None, answers: dict[str, Any] | None) -> ConversationResult:
         if draft is None:
             return ConversationResult("OPEN", "SELECT_SERVICE", {"catalog": catalog})
         return ConversationResult("OPEN", draft.step, {"catalog": catalog, "answers": answers}, draft.version)
 
-    def _save(self, context: ChannelContext, options: Mapping[str, Mapping[str, Any]], draft: Draft | None, current: dict[str, Any] | None, action: ChannelAction) -> ConversationResult:
+    def _save(self, context: ChannelContext, catalog: Mapping[str, Any], options: Mapping[str, Mapping[str, Any]], draft: Draft | None, current: dict[str, Any] | None, action: ChannelAction) -> ConversationResult:
         expected = 0 if draft is None else draft.version
         answers = dict(current or {})
         if action.kind == "SELECT_SERVICE":
@@ -197,4 +197,6 @@ class ChannelConversation:
         else:
             raise GatewayError("INVALID_ACTION")
         saved = self._gateway.save_draft(context, expected_version=expected, answers=answers, step=step, event_id=context.event_id)
-        return ConversationResult("SAVED", step, {"answers": answers}, saved.version)
+        # Catalog enrichment is a read projection only; it is not persisted or
+        # included in the mutation/event protocol.
+        return ConversationResult("SAVED", step, {"catalog": catalog, "answers": answers}, saved.version)

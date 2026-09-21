@@ -11,8 +11,8 @@ from apps.bot.sivka_burka_bot.telegram_conversation import (
     TelegramConversationOrchestrator,
     TelegramConversationOutcome,
 )
-from apps.bot.sivka_burka_bot.telegram_screen_actions import TelegramScreenActionResolver
-from apps.bot.sivka_burka_bot.telegram_interactions import TelegramInteractionMapper
+from apps.bot.sivka_burka_bot.telegram_interactions import TelegramInteractionError, TelegramInteractionMapper
+from apps.bot.sivka_burka_bot.telegram_screen_actions import TelegramScreenActionError, TelegramScreenActionResolver
 from apps.bot.sivka_burka_bot.telegram_updates import AcceptedTelegramUpdate, InputKind
 
 
@@ -114,10 +114,10 @@ def test_text_input_preserves_screen_required_error_and_never_calls_conversation
 
 
 def test_text_input_unsupported_screen_stops_after_preflight():
-    orchestrator, calls = harness([ConversationResult("OPEN", "DETAILS", {"catalog": CATALOG, "answers": {"service_option_id": "ride"}}, 1)])
-    with pytest.raises(Exception) as raised:
+    orchestrator, calls = harness([ConversationResult("OPEN", "DETAILS", {"catalog": CATALOG, "answers": {"service_option_id": "ride", "requester": {"name": "Alice"}}}, 1)])
+    with pytest.raises(TelegramScreenActionError) as raised:
         orchestrator.handle(update(text="some free text"))
-    assert raised.value.code == "SCREEN_INPUT_UNSUPPORTED"
+    assert raised.value.code == "INVALID_DETAILS_INPUT"
     assert len(calls) == 1
 
 
@@ -137,7 +137,7 @@ def test_text_screen_resolver_error_identity_stops_after_preflight(monkeypatch):
 
 def test_mapper_error_identity_is_preserved_and_never_calls_conversation():
     orchestrator, calls = harness([])
-    with pytest.raises(Exception) as raised:
+    with pytest.raises(TelegramInteractionError) as raised:
         orchestrator.handle(update(text="/unsupported"))
     assert raised.value.code == "UNSUPPORTED_COMMAND"
     assert len(calls) == 0

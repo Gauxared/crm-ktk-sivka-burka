@@ -11,6 +11,12 @@ from apps.bot.sivka_burka_bot.telegram_screen_actions import TelegramScreenActio
 CONTEXT = ChannelContext(Platform.TELEGRAM, "integration", "sender", "chat", "event")
 CATALOG = {"catalog_version": 3, "services": []}
 PREFLIGHT = ConversationResult("OPEN", "REQUESTER", {"catalog": CATALOG, "answers": {"service_option_id": "ride"}}, 1)
+DETAILS_PREFLIGHT = ConversationResult(
+    "OPEN",
+    "DETAILS",
+    {"catalog": CATALOG, "answers": {"service_option_id": "ride", "requester": {"name": "Alice"}}},
+    2,
+)
 
 
 def intent(text="Alice", *, context=CONTEXT, kind=TelegramIntentKind.TEXT_INPUT, payload=None, callback=None):
@@ -84,3 +90,63 @@ def test_4096_text_is_valid_intent_but_invalid_requester_input():
     with pytest.raises(TelegramScreenActionError) as raised:
         TelegramScreenActionResolver().resolve(intent("x" * 4096), PREFLIGHT)
     assert raised.value.code == "INVALID_REQUESTER_INPUT"
+
+
+@pytest.mark.parametrize(
+    "experience, expected",
+    [("Новичок", "BEGINNER"), ("опытный", "EXPERIENCED"), ("НЕ УКАЗАНО", "UNKNOWN")],
+)
+def test_details_input_maps_exact_immutable_action(experience, expected):
+    text = (
+        "Участники: 2\n"
+        "Дата: 2026-10-01\n"
+        "Время: -\n"
+        f"Опыт: {experience}\n"
+        "Комментарий: -"
+    )
+    action = TelegramScreenActionResolver().resolve(intent(text), DETAILS_PREFLIGHT)
+    assert type(action) is ChannelAction
+    assert action.kind == "SET_DETAILS"
+    assert type(action.payload) is MappingProxyType
+    assert dict(action.payload) == {
+        "participants_count": 2,
+        "requested_time": {"date": "2026-10-01", "time_text": None},
+        "experience": expected,
+        "comment": "",
+    }
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Дата: 2026-10-01",
+        "Участники: 01\nДата: 2026-10-01\nВремя: -\nОпыт: Новичок\nКомментарий: -",
+        "Участники: 101\nДата: 2026-10-01\nВремя: -\nОпыт: Новичок\nКомментарий: -",
+        "Участники: 2\nДата: 2026-02-30\nВремя: -\nОпыт: Новичок\nКомментарий: -",
+        "Участники: 2\nДата: 2026-10-01\nВремя: \nОпыт: Новичок\nКомментарий: -",
+        "Участники: 2\nДата: 2026-10-01\nВремя: -\nОпыт: Неопытный\nКомментарий: -",
+        "Участники: 2\nДата: 2026-10-01\nВремя: -\nОпыт: Новичок\nКомментарий: x\x00y",
+    ],
+)
+def test_malformed_details_are_safe_and_typed(text):
+    with pytest.raises(TelegramScreenActionError) as raised:
+        TelegramScreenActionResolver().resolve(intent(text), DETAILS_PREFLIGHT)
+    assert raised.value.code == "INVALID_DETAILS_INPUT"
+    assert text not in str(raised.value)
+    assert text not in repr(raised.value)
+
+
+@pytest.mark.parametrize(
+    "preflight",
+    [
+        ConversationResult("SAVED", "DETAILS", DETAILS_PREFLIGHT.data, 2),
+        ConversationResult("OPEN", "DETAILS", {"catalog": CATALOG, "answers": {"service_option_id": "ride"}}, 2),
+        ConversationResult("OPEN", "DETAILS", DETAILS_PREFLIGHT.data, None),
+        ConversationResult("OPEN", "DETAILS", DETAILS_PREFLIGHT.data, 2, {"trusted": "hidden"}),
+    ],
+)
+def test_malformed_details_preflight_is_rejected(preflight):
+    text = "Участники: 2\nДата: 2026-10-01\nВремя: -\nОпыт: Новичок\nКомментарий: -"
+    with pytest.raises(TelegramScreenActionError) as raised:
+        TelegramScreenActionResolver().resolve(intent(text), preflight)
+    assert raised.value.code == "INVALID_SCREEN_RESULT"
