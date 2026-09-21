@@ -1,0 +1,66 @@
+{
+  "id": "TG-002",
+  "title": "Repair Telegram update boundary contract and evidence",
+  "type": "implementation",
+  "status": "BACKLOG",
+  "priority": "high",
+  "executor": {"preferred": "cloud", "fallback": "cloud"},
+  "reviewer": "cloud",
+  "depends_on": ["TG-001"],
+  "allowed_paths": [
+    "apps/bot/sivka_burka_bot/telegram_updates.py",
+    "tests/telegram_adapter/**",
+    "tasks/specs/TG-001.json",
+    "tasks/specs/TG-002.json"
+  ],
+  "forbidden_paths": [
+    ".env",
+    ".env.*",
+    "alembic/**",
+    "apps/api/**",
+    "apps/web/**",
+    "apps/bot/sivka_burka_bot/__init__.py",
+    "packages/**",
+    "docs/**",
+    "scripts/**",
+    "config/**",
+    "pyproject.toml"
+  ],
+  "context": [
+    "AGENTS.md",
+    "docs/development-pipeline.md",
+    "apps/api/sivka_burka_api/channel_gateway.py",
+    "apps/bot/sivka_burka_bot/telegram_updates.py",
+    "tests/telegram_adapter/test_telegram_updates.py"
+  ],
+  "requirements": [
+    "Repair the reviewed TG-001 implementation without adding transport or product behavior. Add the exact original TG-001 contract from the primary checkout .pipeline/TG-001-spec.json and this TG-002 contract to tasks/specs so both accepted task definitions are versioned with the code.",
+    "Construct every accepted context through channel_gateway.validate_context before returning it. Preserve the original trusted integration/platform/event mapping and convert only validated Telegram integer sender/chat identifiers to decimal strings.",
+    "For callback_query, ignore only explicit non-private chat types group, supergroup or channel. A missing, non-mapping or structurally invalid callback message/chat is MALFORMED_UPDATE, except an actually absent message is INLINE_CALLBACK. Keep bot callbacks ignored. Do not classify an unknown or missing chat type, missing/boolean chat id, or malformed message_id as a valid non-private callback.",
+    "A body containing only update_id is MALFORMED_UPDATE. When neither supported payload exists, return UNSUPPORTED_UPDATE only when the body includes at least one recognized Telegram Update member from the current adapter allowlist; unrelated spoof fields alone are malformed. Multiple unsupported members may still be ignored because no trusted context is produced. Keep message plus callback_query contradictory and malformed.",
+    "Expand focused pure tests into a readable parameterized negative matrix covering constructor integration/secret validation, identical missing/malformed/wrong secret behavior and proof that an unauthorized call does not inspect body, secret non-disclosure in str/repr/results, text and callback happy paths, unknown-field spoofing, accepted-context validation, deterministic event IDs, immutability, all update ID bounds including bool, message sender/chat/message/text failures, media/group/bot ignores, callback ID/sender/message/chat/message_id/data failures and ignores, 64-byte UTF-8 boundaries, contradictory/no/recognized-unsupported payloads. Assert exact typed error codes and ignored reasons.",
+    "Keep the module deterministic and side-effect free. Do not add SDKs, HTTP routes, environment loading, logging, persistence, identity/conversation calls, user-field parsing, copy, delivery, retries, migrations, external calls or changes outside allowed paths."
+  ],
+  "acceptance": [
+    "Malformed callback structures cannot bypass validation as ignored non-private traffic, while explicit group/channel and inline callbacks remain harmless ignores.",
+    "The complete TG-001 trust contract is directly supported by focused assertions and both task contracts are tracked.",
+    "Focused Telegram tests, the existing channel-conversation tests, scope and whitespace checks pass."
+  ],
+  "validation": [
+    {"name": "Telegram adapter tests", "argv": ["{python}", "-m", "pytest", "tests/telegram_adapter", "-q"], "timeout": 120},
+    {"name": "conversation regression", "argv": ["{python}", "-m", "pytest", "tests/channel_conversation", "-q"], "timeout": 120},
+    {"name": "whitespace", "argv": ["git", "diff", "--check"], "timeout": 10}
+  ],
+  "risk": "medium",
+  "retry_limit": 0,
+  "shared_paths_approval": {
+    "paths": [
+      "apps/bot/sivka_burka_bot/telegram_updates.py",
+      "tests/telegram_adapter/**",
+      "tasks/specs/TG-001.json",
+      "tasks/specs/TG-002.json"
+    ],
+    "reviewer": "cloud:codex",
+    "reason": "Required repair of the accepted Telegram trust boundary and its missing tracked evidence before transport integration."
+  }
+}

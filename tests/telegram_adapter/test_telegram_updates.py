@@ -2,6 +2,7 @@ import dataclasses
 
 import pytest
 
+import apps.bot.sivka_burka_bot.telegram_updates as telegram_updates
 from apps.api.sivka_burka_api.channel_gateway import Platform
 from apps.bot.sivka_burka_bot.telegram_updates import (
     AcceptedTelegramUpdate,
@@ -67,3 +68,101 @@ def test_valid_unsupported_updates_are_ignored_without_context():
     assert adapter().parse(SECRET, {"update_id": 1, "edited_message": {}}) == IgnoredTelegramUpdate("UNSUPPORTED_UPDATE")
     assert adapter().parse(SECRET, message(chat={"id": 42, "type": "group"})) == IgnoredTelegramUpdate("NON_PRIVATE_MESSAGE")
     assert adapter().parse(SECRET, callback(message=None)) == IgnoredTelegramUpdate("INLINE_CALLBACK")
+
+
+@pytest.mark.parametrize("secret", [None, 1, "", "bad secret", "x" * 257])
+def test_constructor_rejects_invalid_secrets_without_leaking_them(secret):
+    with pytest.raises(ValueError):
+        TelegramUpdateAdapter("integration-1", secret)
+
+
+@pytest.mark.parametrize("integration_id", ["", " leading", "trailing ", "a\x00b", "x" * 129])
+def test_constructor_rejects_invalid_integration_ids(integration_id):
+    with pytest.raises(ValueError):
+        TelegramUpdateAdapter(integration_id, SECRET)
+
+
+def test_unauthorized_parse_does_not_inspect_body():
+    class ExplodingBody(dict):
+        def __contains__(self, key):
+            raise AssertionError("body was inspected")
+
+        def get(self, key, default=None):
+            raise AssertionError("body was inspected")
+
+    with pytest.raises(TelegramUpdateError) as error:
+        adapter().parse(None, ExplodingBody())
+    assert error.value.code == "UNAUTHORIZED"
+    assert "secret_123" not in str(error.value)
+    assert "secret_123" not in repr(error.value)
+
+
+@pytest.mark.parametrize(
+    ("body", "reason"),
+    [
+        (callback(message=None), "INLINE_CALLBACK"),
+        (callback(message={"message_id": 8, "chat": {"id": 42, "type": "group"}}), "NON_PRIVATE_CALLBACK"),
+        (callback(message={"message_id": 8, "chat": {"id": 42, "type": "supergroup"}}), "NON_PRIVATE_CALLBACK"),
+        (callback(message={"message_id": 8, "chat": {"id": 42, "type": "channel"}}), "NON_PRIVATE_CALLBACK"),
+    ],
+)
+def test_callback_ignores_only_explicit_non_private_or_inline_messages(body, reason):
+    assert adapter().parse(SECRET, body) == IgnoredTelegramUpdate(reason)
+
+
+@pytest.mark.parametrize(
+    "message_value",
+    [{}, {"message_id": 8}, {"message_id": 8, "chat": {}}, {"message_id": True, "chat": {"id": 42, "type": "private"}}],
+)
+def test_callback_malformed_message_and_chat_are_errors(message_value):
+    with pytest.raises(TelegramUpdateError) as error:
+        adapter().parse(SECRET, callback(message=message_value))
+    assert error.value.code == "MALFORMED_UPDATE"
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        {"update_id": 1},
+        {"update_id": 1, "spoofed_payload": {}},
+        {"update_id": 1, "message": {}, "callback_query": {}},
+        {"update_id": -1, "message": {}},
+        {"update_id": 2_147_483_648, "message": {}},
+        {"update_id": True, "message": {}},
+    ],
+)
+def test_no_supported_payloads_and_update_id_bounds_are_malformed(body):
+    with pytest.raises(TelegramUpdateError) as error:
+        adapter().parse(SECRET, body)
+    assert error.value.code == "MALFORMED_UPDATE"
+
+
+@pytest.mark.parametrize("member", ["edited_message", "channel_post", "edited_channel_post", "inline_query", "my_chat_member"])
+def test_recognized_unsupported_update_members_are_ignored(member):
+    assert adapter().parse(SECRET, {"update_id": 1, member: {"spoof": True}}) == IgnoredTelegramUpdate("UNSUPPORTED_UPDATE")
+
+
+def test_acceptance_is_immutable_and_deterministic_without_spoofing_context():
+    body = message(platform="VK", integration_id="spoof", event_id="spoof")
+    first = adapter().parse(SECRET, body)
+    second = adapter().parse(SECRET, dict(body))
+    assert first == second
+    assert first.context.platform is Platform.TELEGRAM
+    assert first.context.integration_id == "integration-1"
+    assert first.context.event_id == "telegram-update:9"
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        first.context = first.context
+
+
+def test_every_accepted_context_is_sent_through_gateway_validation(monkeypatch):
+    calls = []
+    original = telegram_updates.validate_context
+
+    def recording_validator(context):
+        calls.append(context)
+        return original(context)
+
+    monkeypatch.setattr(telegram_updates, "validate_context", recording_validator)
+    telegram_updates.TelegramUpdateAdapter("integration-1", SECRET).parse(SECRET, message())
+    telegram_updates.TelegramUpdateAdapter("integration-1", SECRET).parse(SECRET, callback())
+    assert len(calls) == 2

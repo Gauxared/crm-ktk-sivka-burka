@@ -1,0 +1,69 @@
+{
+  "id": "TG-001",
+  "title": "Normalize authenticated Telegram webhook updates",
+  "type": "implementation",
+  "status": "BACKLOG",
+  "priority": "high",
+  "executor": {"preferred": "cloud", "fallback": "cloud"},
+  "reviewer": "cloud",
+  "depends_on": ["BOT-008", "BOT-011"],
+  "allowed_paths": [
+    "apps/bot/sivka_burka_bot/__init__.py",
+    "apps/bot/sivka_burka_bot/telegram_updates.py",
+    "tests/telegram_adapter/**",
+    "tasks/specs/TG-001.json"
+  ],
+  "forbidden_paths": [
+    ".env",
+    ".env.*",
+    "alembic/**",
+    "apps/api/**",
+    "apps/web/**",
+    "apps/bot/.gitkeep",
+    "packages/**",
+    "docs/**",
+    "scripts/**",
+    "config/**",
+    "pyproject.toml"
+  ],
+  "context": [
+    "AGENTS.md",
+    "docs/development-pipeline.md",
+    "docs/architecture.md",
+    "docs/api.md",
+    "tasks/specs/BOT-002.json",
+    "tasks/specs/BOT-008.json",
+    "tasks/specs/BOT-009.json",
+    "tasks/specs/BOT-010.json",
+    "tasks/specs/BOT-011.json",
+    "apps/api/sivka_burka_api/channel_gateway.py"
+  ],
+  "requirements": [
+    "Add a pure TelegramUpdateAdapter boundary that accepts an injected non-secret integration_id, an injected runtime webhook secret and parse(secret_header, body). Authenticate X-Telegram-Bot-Api-Secret-Token before inspecting the body or producing any accepted event. Validate the configured secret as 1..256 ASCII characters from A-Z, a-z, 0-9, underscore and hyphen; compare a string header with hmac.compare_digest. Missing, malformed and incorrect secrets produce the same typed UNAUTHORIZED error and never include the configured or supplied secret in errors, repr, results or module state beyond the private adapter instance field.",
+    "Return immutable typed results: AcceptedTelegramUpdate with a validated ChannelContext, input kind TEXT or CALLBACK, normalized input text/data and optional callback_query_id; or IgnoredTelegramUpdate with a bounded semantic reason for valid but unsupported Telegram update kinds. Use Telegram as the platform, the injected integration_id, trusted integer from.id and private chat.id converted to decimal strings, and deterministic event_id telegram-update:<update_id>. No untrusted payload field may override platform or integration.",
+    "Strictly accept only a body mapping with integer non-boolean update_id in 0..2147483647 and exactly one supported payload. Accept message only when it has integer non-boolean message_id, a non-bot integer sender id, private chat with integer non-boolean id, and non-empty text of at most 4096 Unicode characters. Accept callback_query only when it has a bounded non-empty id, non-bot integer sender id, an accessible message with private chat and integer message_id, and non-empty data whose UTF-8 representation is at most 64 bytes. Inline callbacks, group/channel messages, bot senders, media-only messages and valid unsupported update types are ignored without a trusted event; contradictory supported payloads and malformed supported structures raise a typed MALFORMED_UPDATE error.",
+    "Keep the adapter deterministic and side-effect free. Do not retain raw updates, call the identity or conversation services, access persistence, log payloads, parse user business fields, render Russian copy, add HTTP routes, Telegram SDKs, bot tokens, environment loading, outbound delivery, retries or external calls. Unknown fields never enter the accepted result.",
+    "Add exhaustive pure tests for correct secret-first behavior, secret non-disclosure, private text and callback normalization, Unicode callback byte length, numeric bool rejection, ID bounds, spoofed platform/integration fields, contradictory and malformed structures, unsupported/edit/media/group/bot/inline cases, immutability, deterministic event IDs and validated ChannelContext."
+  ],
+  "acceptance": [
+    "A later Telegram HTTP adapter can authenticate and normalize supported updates without exposing raw Telegram payloads or secrets to the shared conversation core.",
+    "Only trusted Telegram identifiers construct ChannelContext; malformed or unsupported input causes no side effects and cannot spoof platform, integration or event identity.",
+    "Focused Telegram adapter tests, scope and whitespace checks pass."
+  ],
+  "validation": [
+    {"name": "Telegram adapter tests", "argv": ["{python}", "-m", "pytest", "tests/telegram_adapter", "-q"], "timeout": 120},
+    {"name": "whitespace", "argv": ["git", "diff", "--check"], "timeout": 10}
+  ],
+  "risk": "medium",
+  "retry_limit": 0,
+  "shared_paths_approval": {
+    "paths": [
+      "apps/bot/sivka_burka_bot/__init__.py",
+      "apps/bot/sivka_burka_bot/telegram_updates.py",
+      "tests/telegram_adapter/**",
+      "tasks/specs/TG-001.json"
+    ],
+    "reviewer": "cloud:codex",
+    "reason": "Accepted isolated Telegram trust boundary over the reviewed shared conversation context; network transport and product UX remain separate tasks."
+  }
+}

@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Mapping
 
-from apps.api.sivka_burka_api.channel_gateway import ChannelContext, Platform
+from apps.api.sivka_burka_api.channel_gateway import ChannelContext, Platform, validate_context
 
 
 class TelegramUpdateError(ValueError):
@@ -45,6 +45,14 @@ class IgnoredTelegramUpdate:
 _SECRET_RE = re.compile(r"^[A-Za-z0-9_-]{1,256}\Z")
 _UPDATE_MAX = 2_147_483_647
 _CALLBACK_ID_MAX = 256
+_NON_PRIVATE_TYPES = frozenset({"group", "supergroup", "channel"})
+_RECOGNIZED_UPDATE_MEMBERS = frozenset(
+    {
+        "message", "edited_message", "channel_post", "edited_channel_post",
+        "inline_query", "chosen_inline_result", "callback_query", "shipping_query",
+        "pre_checkout_query", "my_chat_member", "chat_member", "chat_join_request",
+    }
+)
 
 
 def _integer(value: Any, *, minimum: int | None = None, maximum: int | None = None) -> bool:
@@ -95,16 +103,18 @@ class TelegramUpdateAdapter:
             return self._message(update_id, body["message"])
         if has_callback:
             return self._callback(update_id, body["callback_query"])
-        return IgnoredTelegramUpdate("UNSUPPORTED_UPDATE")
+        if set(body).intersection(_RECOGNIZED_UPDATE_MEMBERS):
+            return IgnoredTelegramUpdate("UNSUPPORTED_UPDATE")
+        raise TelegramUpdateError("MALFORMED_UPDATE")
 
     def _context(self, update_id: int, sender_id: int, chat_id: int) -> ChannelContext:
-        return ChannelContext(
+        return validate_context(ChannelContext(
             Platform.TELEGRAM,
             self._integration_id,
             str(sender_id),
             str(chat_id),
             f"telegram-update:{update_id}",
-        )
+        ))
 
     @staticmethod
     def _user(value: Any) -> int | None:
@@ -124,7 +134,7 @@ class TelegramUpdateAdapter:
         if not _mapping(message):
             raise TelegramUpdateError("MALFORMED_UPDATE")
         chat_value = message.get("chat")
-        if _mapping(chat_value) and chat_value.get("type") in {"group", "supergroup", "channel"}:
+        if _mapping(chat_value) and chat_value.get("type") in _NON_PRIVATE_TYPES:
             return IgnoredTelegramUpdate("NON_PRIVATE_MESSAGE")
         user_value = message.get("from")
         if _mapping(user_value) and user_value.get("is_bot") is True:
@@ -158,9 +168,12 @@ class TelegramUpdateAdapter:
             if message is None:
                 return IgnoredTelegramUpdate("INLINE_CALLBACK")
             raise TelegramUpdateError("MALFORMED_UPDATE")
-        chat = self._private_chat(message.get("chat"))
-        if chat is None:
+        raw_chat = message.get("chat")
+        if _mapping(raw_chat) and raw_chat.get("type") in _NON_PRIVATE_TYPES:
             return IgnoredTelegramUpdate("NON_PRIVATE_CALLBACK")
+        chat = self._private_chat(raw_chat)
+        if chat is None:
+            raise TelegramUpdateError("MALFORMED_UPDATE")
         if not _integer(message.get("message_id"), minimum=0):
             raise TelegramUpdateError("MALFORMED_UPDATE")
         if not isinstance(data, str) or not data or len(data.encode("utf-8")) > 64:
