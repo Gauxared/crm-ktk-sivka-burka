@@ -1,0 +1,32 @@
+{
+  "id": "BOT-011",
+  "title": "Complete conversation state-machine evidence",
+  "type": "implementation",
+  "status": "BACKLOG",
+  "priority": "high",
+  "executor": {"preferred": "cloud", "fallback": "cloud"},
+  "reviewer": "cloud",
+  "depends_on": ["BOT-010"],
+  "allowed_paths": ["tests/channel_conversation/**", "tasks/specs/BOT-011.json"],
+  "forbidden_paths": [".env", ".env.*", "alembic/**", "apps/**", "packages/**", "docs/**", "config/**", "pyproject.toml", "tasks/specs/BOT-009.json", "tasks/specs/BOT-010.json"],
+  "requirements": [
+    "Add the BOT-010 test evidence that its self-review claimed but the actual tests do not contain. Do not change production code.",
+    "Use exact pytest.raises(GatewayError), assert the expected code, and avoid broad Exception assertions. Cover stable accepted replay metadata while proving public as_dict still excludes internal receipt/inquiry IDs.",
+    "Cover BEGINNER, EXPERIENCED and omitted UNKNOWN experience without any admission/gallop gate or hidden draft field. Cover optional self-reported contact and omitted contact separately.",
+    "Cover every out-of-order mutating action, RESET without a draft, required/extra/malformed action fields, and verify zero mutations on every rejection plus exactly one mutation on each accepted mutating action.",
+    "Prove inactive or missing service option rejection at initial selection, resumed draft and SUBMIT after catalog change. Prove the exact original GatewayError object propagates for VERSION_CONFLICT, IDEMPOTENCY_MISMATCH, RESULT_EXPIRED and CATALOG_UNAVAILABLE across relevant gateway operations.",
+    "Keep the recording fake deterministic and platform-neutral; add no PostgreSQL, SDK, transport, routes, copy, credentials or production changes."
+  ],
+  "acceptance": [
+    "Focused tests directly prove replay privacy, experience neutrality, strict transitions, inactive option checks, exact mutation counts and identity-preserving gateway errors.",
+    "The actual diff changes only focused tests and the tracked BOT-011 contract.",
+    "Focused conversation tests, scope and whitespace checks pass."
+  ],
+  "validation": [
+    {"name": "channel conversation tests", "argv": ["{python}", "-m", "pytest", "tests/channel_conversation", "-q"], "timeout": 120},
+    {"name": "whitespace", "argv": ["git", "diff", "--check"], "timeout": 10}
+  ],
+  "risk": "low",
+  "retry_limit": 0,
+  "shared_paths_approval": {"paths": ["tests/channel_conversation/**", "tasks/specs/BOT-011.json"], "reviewer": "cloud:codex", "reason": "Test-only completion of falsely claimed BOT-010 state-machine evidence before publication."}
+}
