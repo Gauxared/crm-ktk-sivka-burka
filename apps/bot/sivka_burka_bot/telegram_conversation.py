@@ -12,6 +12,7 @@ from apps.api.sivka_burka_api.channel_conversation import (
 )
 from .telegram_actions import TelegramActionResolver
 from .telegram_interactions import TelegramInteractionMapper, TelegramIntentKind
+from .telegram_screen_actions import TelegramScreenActionResolver
 from .telegram_updates import AcceptedTelegramUpdate
 
 
@@ -43,16 +44,20 @@ class TelegramConversationOrchestrator:
         self,
         mapper: TelegramInteractionMapper,
         resolver: TelegramActionResolver,
+        screen_resolver: TelegramScreenActionResolver,
         conversation: ChannelConversation,
     ) -> None:
         if type(mapper) is not TelegramInteractionMapper:
             raise TypeError("Invalid Telegram interaction mapper")
         if type(resolver) is not TelegramActionResolver:
             raise TypeError("Invalid Telegram action resolver")
+        if type(screen_resolver) is not TelegramScreenActionResolver:
+            raise TypeError("Invalid Telegram screen action resolver")
         if type(conversation) is not ChannelConversation:
             raise TypeError("Invalid channel conversation")
         self._mapper = mapper
         self._resolver = resolver
+        self._screen_resolver = screen_resolver
         self._conversation = conversation
 
     def handle(self, update: AcceptedTelegramUpdate) -> TelegramConversationOutcome:
@@ -62,6 +67,12 @@ class TelegramConversationOrchestrator:
             preflight = self._conversation.handle(context, _empty_action())
             catalog = self._catalog(preflight)
             action = self._resolver.resolve(intent, catalog)
+            result = self._conversation.handle(context, action)
+            return TelegramConversationOutcome(result, intent.callback_query_id)
+
+        if intent.kind is TelegramIntentKind.TEXT_INPUT:
+            preflight = self._conversation.handle(context, _empty_action())
+            action = self._screen_resolver.resolve(intent, preflight)
             result = self._conversation.handle(context, action)
             return TelegramConversationOutcome(result, intent.callback_query_id)
 

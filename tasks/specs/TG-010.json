@@ -1,0 +1,88 @@
+{
+  "id": "TG-010",
+  "title": "Telegram requester text input on REQUESTER screen",
+  "type": "implementation",
+  "status": "BACKLOG",
+  "priority": "high",
+  "executor": {"preferred": "cloud", "fallback": "cloud"},
+  "reviewer": "cloud",
+  "depends_on": ["TG-009"],
+  "allowed_paths": [
+    "apps/bot/sivka_burka_bot/telegram_screen_actions.py",
+    "apps/bot/sivka_burka_bot/telegram_conversation.py",
+    "tests/telegram_screen_actions/**",
+    "tests/telegram_conversation/**",
+    "tasks/specs/TG-010.json"
+  ],
+  "forbidden_paths": [
+    ".env",
+    ".env.*",
+    "alembic/**",
+    "apps/api/**",
+    "apps/web/**",
+    "packages/**",
+    "docs/**",
+    "scripts/**",
+    "config/**",
+    "pyproject.toml",
+    "apps/bot/sivka_burka_bot/telegram_updates.py",
+    "apps/bot/sivka_burka_bot/telegram_interactions.py",
+    "apps/bot/sivka_burka_bot/telegram_actions.py",
+    "apps/bot/sivka_burka_bot/__init__.py",
+    "tasks/specs/TG-001.json",
+    "tasks/specs/TG-002.json",
+    "tasks/specs/TG-003.json",
+    "tasks/specs/TG-004.json",
+    "tasks/specs/TG-005.json",
+    "tasks/specs/TG-006.json",
+    "tasks/specs/TG-007.json",
+    "tasks/specs/TG-008.json",
+    "tasks/specs/TG-009.json"
+  ],
+  "context": [
+    "AGENTS.md",
+    "docs/development-pipeline.md",
+    "tasks/specs/TG-008.json",
+    "tasks/specs/TG-009.json",
+    "apps/api/sivka_burka_api/channel_conversation.py",
+    "apps/api/sivka_burka_api/channel_gateway.py",
+    "apps/bot/sivka_burka_bot/telegram_updates.py",
+    "apps/bot/sivka_burka_bot/telegram_interactions.py",
+    "apps/bot/sivka_burka_bot/telegram_actions.py",
+    "apps/bot/sivka_burka_bot/telegram_conversation.py",
+    "tests/telegram_conversation/test_orchestrator.py"
+  ],
+  "requirements": [
+    "Add a pure TelegramScreenActionResolver (or equally narrow name) accepting only exact mapper-produced TEXT_INPUT TelegramIntent and exact ConversationResult preflight shapes.",
+    "Revalidate exact immutable intent shape: TELEGRAM context, TEXT_INPUT kind, MappingProxyType payload exactly {text}, no callback id, normalized non-empty text up to 4096 characters. Reject forged or mutable payloads with typed safe INVALID_INTENT.",
+    "For exact preflight screen REQUESTER and the accepted current draft form, return immutable ChannelAction(SET_REQUESTER, {name: text}) with name only and no contact. Enforce ChannelConversation name limit 1..200; invalid requester text returns typed safe INVALID_REQUESTER_INPUT. Error str/repr never includes text or identifiers.",
+    "For every other screen, kind, result shape, malformed data or answers return typed safe SCREEN_INPUT_UNSUPPORTED or INVALID_SCREEN_RESULT before mutation. Never parse DETAILS, date, time, participants, experience, comment or commands, and never pass adapter_metadata into an action or outcome.",
+    "Inject the screen resolver as a strict dependency in TelegramConversationOrchestrator. TEXT_INPUT performs mapper, exactly one read-only OPEN preflight with the same exact context, screen resolver, then exactly one resolved conversation call and at most one mutation. Preserve exact mapper, screen-resolver and conversation error identity.",
+    "Keep existing OPEN/HELP/RESET/SUBMIT at one conversation call and SELECT_SERVICE at one OPEN preflight plus SELECT_SERVICE call using TelegramActionResolver; do not change callback behavior. Do not add contact from sender/chat, persist or log raw text, or perform transport/HTTP/SDK/env/retry/external calls. Do not change the coarse FSM or invent a DETAILS format. If REQUESTER results include catalog/answers, accept only the necessary agreed form.",
+    "Add exhaustive pure resolver tests for exact types, context/platform/kind, immutable and forged payloads, text boundaries 1/200/201/4096, whitespace/NUL, callback presence, malformed screen/result/data/answers and exact immutable action; add orchestrator ordering/context/callback/mutation/error-identity and regression coverage."
+  ],
+  "acceptance": [
+    "Focused screen-action and conversation tests, all Telegram adapter/interaction/action/conversation regressions, complete pytest suite and git diff --check pass.",
+    "Actual diff stays within the approved allowed paths and makes no changes to the API, transport, persistence, web, packages, docs, config or existing coarse FSM contracts."
+  ],
+  "validation": [
+    {"name": "Telegram screen action tests", "argv": ["{python}", "-m", "pytest", "tests/telegram_screen_actions", "-q"], "timeout": 120},
+    {"name": "Telegram conversation tests", "argv": ["{python}", "-m", "pytest", "tests/telegram_conversation", "-q"], "timeout": 120},
+    {"name": "Telegram regression", "argv": ["{python}", "-m", "pytest", "tests/telegram_interactions", "tests/telegram_actions", "tests/telegram_adapter", "tests/telegram_conversation", "-q"], "timeout": 120},
+    {"name": "complete tests", "argv": ["{python}", "-m", "pytest", "-q"], "timeout": 180},
+    {"name": "whitespace", "argv": ["git", "diff", "--check"], "timeout": 10}
+  ],
+  "risk": "medium",
+  "retry_limit": 0,
+  "shared_paths_approval": {
+    "paths": [
+      "apps/bot/sivka_burka_bot/telegram_screen_actions.py",
+      "apps/bot/sivka_burka_bot/telegram_conversation.py",
+      "tests/telegram_screen_actions/**",
+      "tests/telegram_conversation/**",
+      "tasks/specs/TG-010.json"
+    ],
+    "reviewer": "cloud:codex",
+    "reason": "Add the narrowly scoped screen-aware Telegram requester action over the reviewed mapper and shared conversation contracts."
+  }
+}
