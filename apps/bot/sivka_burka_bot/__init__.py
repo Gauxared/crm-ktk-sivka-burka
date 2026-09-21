@@ -9,6 +9,7 @@ from .telegram_updates import (
 )
 from .telegram_interactions import TelegramInteractionError, TelegramInteractionMapper, TelegramIntent, TelegramIntentKind
 from .telegram_actions import TelegramActionError, TelegramActionResolver, resolve_telegram_action
+from .telegram_conversation import TelegramConversationError, TelegramConversationOrchestrator, TelegramConversationOutcome
 
 __all__ = [
     "AcceptedTelegramUpdate",
@@ -23,4 +24,7 @@ __all__ = [
     "TelegramActionError",
     "TelegramActionResolver",
     "resolve_telegram_action",
+    "TelegramConversationError",
+    "TelegramConversationOrchestrator",
+    "TelegramConversationOutcome",
 ]

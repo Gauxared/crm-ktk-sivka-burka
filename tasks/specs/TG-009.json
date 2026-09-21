@@ -1,0 +1,19 @@
+{
+  "id": "TG-009",
+  "title": "Telegram conversation orchestration",
+  "type": "implementation",
+  "status": "BACKLOG",
+  "priority": "high",
+  "executor": {"preferred": "cloud", "fallback": "cloud"},
+  "reviewer": "cloud",
+  "depends_on": ["TG-008"],
+  "allowed_paths": ["apps/bot/sivka_burka_bot/telegram_conversation.py", "tests/telegram_conversation/**", "tasks/specs/TG-009.json", "apps/bot/sivka_burka_bot/__init__.py"],
+  "forbidden_paths": [".env", ".env.*", "alembic/**", "apps/api/**", "apps/web/**", "packages/**", "docs/**", "scripts/**", "config/**", "pyproject.toml", "apps/bot/sivka_burka_bot/telegram_updates.py", "apps/bot/sivka_burka_bot/telegram_interactions.py", "apps/bot/sivka_burka_bot/telegram_actions.py", "tasks/specs/TG-001.json", "tasks/specs/TG-002.json", "tasks/specs/TG-003.json", "tasks/specs/TG-004.json", "tasks/specs/TG-005.json", "tasks/specs/TG-006.json", "tasks/specs/TG-007.json", "tasks/specs/TG-008.json"],
+  "context": ["AGENTS.md", "docs/development-pipeline.md", "tasks/specs/TG-008.json", "apps/api/sivka_burka_api/channel_conversation.py", "apps/api/sivka_burka_api/channel_gateway.py", "apps/bot/sivka_burka_bot/telegram_updates.py", "apps/bot/sivka_burka_bot/telegram_interactions.py", "apps/bot/sivka_burka_bot/telegram_actions.py", "tests/telegram_actions/test_resolver.py"],
+  "requirements": ["Add immutable outcome containing ConversationResult and optional callback_query_id; rerun mapper for every accepted update; inject and strictly validate mapper, resolver and conversation.", "Direct commands resolve without catalog and call conversation once with the same context. SELECT_SERVICE performs OPEN preflight, reads only ConversationResult.data[catalog], resolves and calls SELECT_SERVICE once; malformed catalog returns TelegramConversationError(CATALOG_UNAVAILABLE). TEXT_INPUT stops on SCREEN_REQUIRED before conversation. Preserve error identity and avoid all transport, persistence, logging, retry and external behavior.", "Cover strict dependencies, direct commands, SELECT_SERVICE ordering/context/callback, malformed catalog, zero-call TEXT_INPUT and resolver errors, identity preservation and mutation limits."],
+  "acceptance": ["Focused orchestration tests, Telegram regressions, complete pytest suite and git diff --check pass.", "Actual diff stays within allowed paths."],
+  "validation": [{"name": "Telegram conversation tests", "argv": ["{python}", "-m", "pytest", "tests/telegram_conversation", "-q"], "timeout": 120}, {"name": "Telegram regression", "argv": ["{python}", "-m", "pytest", "tests/telegram_interactions", "tests/telegram_actions", "tests/telegram_adapter", "-q"], "timeout": 120}, {"name": "complete tests", "argv": ["{python}", "-m", "pytest", "-q"], "timeout": 180}, {"name": "whitespace", "argv": ["git", "diff", "--check"], "timeout": 10}],
+  "risk": "medium",
+  "retry_limit": 0,
+  "shared_paths_approval": {"paths": ["apps/bot/sivka_burka_bot/telegram_conversation.py", "tests/telegram_conversation/**", "tasks/specs/TG-009.json", "apps/bot/sivka_burka_bot/__init__.py"], "reviewer": "cloud:codex", "reason": "Add the narrow Telegram orchestration boundary over reviewed contracts."}
+}
