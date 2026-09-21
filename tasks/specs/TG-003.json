@@ -1,0 +1,69 @@
+{
+  "id": "TG-003",
+  "title": "Complete Telegram update trust-boundary evidence",
+  "type": "implementation",
+  "status": "BACKLOG",
+  "priority": "high",
+  "executor": {"preferred": "cloud", "fallback": "cloud"},
+  "reviewer": "cloud",
+  "depends_on": ["TG-002"],
+  "allowed_paths": [
+    "apps/bot/sivka_burka_bot/telegram_updates.py",
+    "tests/telegram_adapter/**",
+    "tasks/specs/TG-003.json"
+  ],
+  "forbidden_paths": [
+    ".env",
+    ".env.*",
+    "alembic/**",
+    "apps/api/**",
+    "apps/web/**",
+    "apps/bot/sivka_burka_bot/__init__.py",
+    "packages/**",
+    "docs/**",
+    "scripts/**",
+    "config/**",
+    "pyproject.toml",
+    "tasks/specs/TG-001.json",
+    "tasks/specs/TG-002.json"
+  ],
+  "context": [
+    "AGENTS.md",
+    "docs/development-pipeline.md",
+    "tasks/specs/TG-001.json",
+    "tasks/specs/TG-002.json",
+    "apps/api/sivka_burka_api/channel_gateway.py",
+    "apps/bot/sivka_burka_bot/telegram_updates.py",
+    "tests/telegram_adapter/test_telegram_updates.py"
+  ],
+  "requirements": [
+    "Complete the TG-001/TG-002 evidence rather than adding new product behavior. Update the recognized Telegram Update member allowlist to match Telegram Bot API 10.3: message, edited_message, channel_post, edited_channel_post, business_connection, business_message, edited_business_message, deleted_business_messages, guest_message, message_reaction, message_reaction_count, inline_query, chosen_inline_result, callback_query, shipping_query, pre_checkout_query, purchased_paid_media, poll, poll_answer, my_chat_member, chat_member, chat_join_request, chat_boost, removed_chat_boost, managed_bot, subscription and stopped_message_generation. Message and callback_query remain the only accepted members; every other listed member is an unsupported ignore with no context.",
+    "Add direct parameterized tests for configured secret rejection including non-string, empty, disallowed ASCII, Unicode and overlength; header missing, non-string and wrong values producing identical UNAUTHORIZED code and safe message; no configured or supplied secret appearing in error str/repr or accepted/ignored result serialization; and proof that unauthorized parsing never inspects the body.",
+    "Add direct message tests for accepted update_id 0 and 2147483647, valid 4096-character text, deterministic trusted context and unknown-field spoof resistance; malformed non-mapping/missing/boolean/negative sender id or missing/non-boolean is_bot, malformed chat mapping/type/boolean id, malformed message_id and non-string/empty/whitespace/overlength text; and exact ignored reasons for bot senders, group/supergroup/channel chats and media-only messages.",
+    "Add direct callback tests for malformed empty/whitespace/non-string/overlength callback id, malformed sender forms, bot ignore, absent message inline ignore, non-mapping/malformed message, explicit non-private chat ignores, malformed private chat/message_id, non-string/empty/over-64-byte data, and acceptance at exact 64 UTF-8 bytes for both ASCII and multibyte input. Assert callback id/data preservation, immutable results and validated context.",
+    "Parameterize every Bot API 10.3 recognized unsupported member and prove unrelated spoof-only/no-member bodies remain MALFORMED_UPDATE. Use exact TelegramUpdateError codes and IgnoredTelegramUpdate reasons; do not rely on a broad happy-path test or broad Exception assertions.",
+    "Copy this exact task contract from the primary checkout .pipeline/TG-003-spec.json into tasks/specs/TG-003.json. Keep the adapter pure and side-effect free; do not add HTTP, SDK, environment loading, logging, persistence, identity/conversation calls, rendering, delivery, retry behavior or external calls."
+  ],
+  "acceptance": [
+    "Every trust decision and Bot API 10.3 Update member in the adapter has direct focused evidence, including exact byte and identifier boundaries.",
+    "Only authenticated private text and accessible private callbacks can produce a validated trusted context; all malformed and ignored classes are explicit.",
+    "Focused Telegram tests, conversation regression, complete project tests, scope and whitespace checks pass."
+  ],
+  "validation": [
+    {"name": "Telegram adapter tests", "argv": ["{python}", "-m", "pytest", "tests/telegram_adapter", "-q"], "timeout": 120},
+    {"name": "conversation regression", "argv": ["{python}", "-m", "pytest", "tests/channel_conversation", "-q"], "timeout": 120},
+    {"name": "complete tests", "argv": ["{python}", "-m", "pytest", "-q"], "timeout": 180},
+    {"name": "whitespace", "argv": ["git", "diff", "--check"], "timeout": 10}
+  ],
+  "risk": "low",
+  "retry_limit": 0,
+  "shared_paths_approval": {
+    "paths": [
+      "apps/bot/sivka_burka_bot/telegram_updates.py",
+      "tests/telegram_adapter/**",
+      "tasks/specs/TG-003.json"
+    ],
+    "reviewer": "cloud:codex",
+    "reason": "Test and compatibility completion for the accepted Telegram trust boundary before functional transport integration."
+  }
+}
