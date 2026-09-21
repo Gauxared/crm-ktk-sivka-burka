@@ -1,0 +1,27 @@
+{
+  "id": "TG-011",
+  "title": "Unique Telegram screen action resolver test module",
+  "type": "repair",
+  "status": "BACKLOG",
+  "priority": "high",
+  "executor": {"preferred": "cloud", "fallback": "cloud"},
+  "reviewer": "cloud",
+  "depends_on": ["TG-010"],
+  "allowed_paths": [
+    "tests/telegram_screen_actions/test_resolver.py",
+    "tests/telegram_screen_actions/test_screen_action_resolver.py",
+    "tasks/specs/TG-011.json"
+  ],
+  "forbidden_paths": [".env", ".env.*", "pyproject.toml", "conftest.py", "tasks/specs/TG-010.json"],
+  "context": ["AGENTS.md", "docs/development-pipeline.md", "tasks/specs/TG-010.json", "tests/telegram_screen_actions/test_resolver.py", "tests/telegram_actions/test_resolver.py"],
+  "requirements": ["Rename tests/telegram_screen_actions/test_resolver.py to tests/telegram_screen_actions/test_screen_action_resolver.py without changing its 19 tests or meaning.", "Do not change production code, existing tests, configuration, markers or TG-010 history."],
+  "acceptance": ["The focused and complete pytest gates pass without import file mismatch.", "Actual diff contains only the approved rename and TG-011 specification."],
+  "validation": [
+    {"name": "focused resolver tests", "argv": ["{python}", "-m", "pytest", "tests/telegram_screen_actions", "tests/telegram_actions", "-q"], "timeout": 120},
+    {"name": "telegram regression", "argv": ["{python}", "-m", "pytest", "tests/telegram_screen_actions", "tests/telegram_conversation", "tests/telegram_interactions", "tests/telegram_actions", "tests/telegram_adapter", "-q"], "timeout": 120},
+    {"name": "complete tests", "argv": ["{python}", "-m", "pytest", "-q"], "timeout": 180},
+    {"name": "whitespace", "argv": ["git", "diff", "--check"], "timeout": 10}
+  ],
+  "risk": "low",
+  "retry_limit": 0
+}
