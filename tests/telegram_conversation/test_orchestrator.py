@@ -11,6 +11,7 @@ from apps.bot.sivka_burka_bot.telegram_conversation import (
     TelegramConversationOrchestrator,
     TelegramConversationOutcome,
 )
+from apps.bot.sivka_burka_bot.telegram_screen_actions import TelegramScreenActionResolver
 from apps.bot.sivka_burka_bot.telegram_interactions import TelegramInteractionMapper
 from apps.bot.sivka_burka_bot.telegram_updates import AcceptedTelegramUpdate, InputKind
 
@@ -40,7 +41,7 @@ def harness(results):
         return results[len(calls) - 1]
 
     conversation.handle = handle
-    return TelegramConversationOrchestrator(TelegramInteractionMapper(), TelegramActionResolver(), conversation), calls
+    return TelegramConversationOrchestrator(TelegramInteractionMapper(), TelegramActionResolver(), TelegramScreenActionResolver(), conversation), calls
 
 
 def test_strict_dependencies_and_immutable_outcome():
@@ -49,7 +50,9 @@ def test_strict_dependencies_and_immutable_outcome():
     with pytest.raises(TypeError):
         TelegramConversationOrchestrator(TelegramInteractionMapper(), object(), ChannelConversation(EmptyGateway()))
     with pytest.raises(TypeError):
-        TelegramConversationOrchestrator(TelegramInteractionMapper(), TelegramActionResolver(), object())
+        TelegramConversationOrchestrator(TelegramInteractionMapper(), TelegramActionResolver(), TelegramScreenActionResolver(), object())
+    with pytest.raises(TypeError):
+        TelegramConversationOrchestrator(TelegramInteractionMapper(), TelegramActionResolver(), object(), ChannelConversation(EmptyGateway()))
     outcome = TelegramConversationOutcome(ConversationResult("OPEN", "START", {}), "cb")
     assert outcome.callback_query_id == "cb"
     with pytest.raises(AttributeError):
@@ -100,11 +103,36 @@ def test_missing_or_malformed_catalog_is_typed_and_does_not_mutate(preflight):
 
 
 def test_text_input_preserves_screen_required_error_and_never_calls_conversation():
-    orchestrator, calls = harness([])
-    with pytest.raises(TelegramActionError) as raised:
+    orchestrator, calls = harness([ConversationResult("OPEN", "REQUESTER", {"catalog": CATALOG, "answers": {"service_option_id": "ride"}}, 1), ConversationResult("SAVED", "DETAILS", {})])
+    outcome = orchestrator.handle(update(text="some free text"))
+    assert outcome.result.screen == "DETAILS"
+    assert len(calls) == 2
+    assert calls[0][0] is calls[1][0] is CONTEXT
+    assert calls[0][1].kind == "OPEN"
+    assert calls[1][1].kind == "SET_REQUESTER"
+    assert calls[1][1].payload == {"name": "some free text"}
+
+
+def test_text_input_unsupported_screen_stops_after_preflight():
+    orchestrator, calls = harness([ConversationResult("OPEN", "DETAILS", {"catalog": CATALOG, "answers": {"service_option_id": "ride"}}, 1)])
+    with pytest.raises(Exception) as raised:
         orchestrator.handle(update(text="some free text"))
-    assert raised.value.code == "SCREEN_REQUIRED"
-    assert len(calls) == 0
+    assert raised.value.code == "SCREEN_INPUT_UNSUPPORTED"
+    assert len(calls) == 1
+
+
+def test_text_screen_resolver_error_identity_stops_after_preflight(monkeypatch):
+    orchestrator, calls = harness([ConversationResult("OPEN", "REQUESTER", {"catalog": CATALOG, "answers": {"service_option_id": "ride"}}, 1)])
+    error = TelegramActionError("SCREEN_SENTINEL")
+
+    def fail(self, intent, preflight):
+        raise error
+
+    monkeypatch.setattr(TelegramScreenActionResolver, "resolve", fail)
+    with pytest.raises(TelegramActionError) as raised:
+        orchestrator.handle(update(text="Alice"))
+    assert raised.value is error
+    assert len(calls) == 1
 
 
 def test_mapper_error_identity_is_preserved_and_never_calls_conversation():
@@ -123,7 +151,7 @@ def test_conversation_error_identity_is_preserved():
         raise error
 
     conversation.handle = handle
-    orchestrator = TelegramConversationOrchestrator(TelegramInteractionMapper(), TelegramActionResolver(), conversation)
+    orchestrator = TelegramConversationOrchestrator(TelegramInteractionMapper(), TelegramActionResolver(), TelegramScreenActionResolver(), conversation)
     with pytest.raises(TelegramActionError) as raised:
         orchestrator.handle(update(text="/start"))
     assert raised.value is error
