@@ -1,0 +1,46 @@
+{
+  "id": "TG-012",
+  "title": "Pure Telegram outcome renderer",
+  "type": "implementation",
+  "status": "BACKLOG",
+  "priority": "high",
+  "executor": {"preferred": "cloud", "fallback": "cloud"},
+  "reviewer": "cloud",
+  "depends_on": ["TG-011"],
+  "allowed_paths": [
+    "apps/bot/sivka_burka_bot/telegram_rendering.py",
+    "apps/bot/sivka_burka_bot/__init__.py",
+    "tests/telegram_rendering/**",
+    "tasks/specs/TG-012.json"
+  ],
+  "forbidden_paths": [
+    ".env", ".env.*", "apps/api/**", "apps/web/**", "packages/**", "docs/**", "scripts/**", "config/**", "pyproject.toml",
+    "apps/bot/sivka_burka_bot/telegram_updates.py", "apps/bot/sivka_burka_bot/telegram_interactions.py", "apps/bot/sivka_burka_bot/telegram_actions.py", "apps/bot/sivka_burka_bot/telegram_conversation.py", "apps/bot/sivka_burka_bot/telegram_screen_actions.py",
+    "tasks/specs/TG-001.json", "tasks/specs/TG-002.json", "tasks/specs/TG-003.json", "tasks/specs/TG-004.json", "tasks/specs/TG-005.json", "tasks/specs/TG-006.json", "tasks/specs/TG-007.json", "tasks/specs/TG-008.json", "tasks/specs/TG-009.json", "tasks/specs/TG-010.json", "tasks/specs/TG-011.json"
+  ],
+  "context": [
+    "AGENTS.md", "docs/development-pipeline.md", "tasks/specs/TG-005.json", "tasks/specs/TG-007.json", "tasks/specs/TG-008.json", "tasks/specs/TG-009.json", "tasks/specs/TG-010.json", "tasks/specs/TG-011.json",
+    "apps/api/sivka_burka_api/public_catalog.py", "apps/api/sivka_burka_api/channel_conversation.py", "apps/bot/sivka_burka_bot/telegram_conversation.py", "apps/bot/sivka_burka_bot/telegram_actions.py", "apps/bot/sivka_burka_bot/telegram_interactions.py", "tests/telegram_conversation/test_orchestrator.py"
+  ],
+  "requirements": [
+    "Add a pure deterministic renderer accepting only exact TelegramConversationOutcome with exact ConversationResult. Define safe typed TelegramRenderError(code), immutable TelegramButton, TelegramMessage and TelegramRenderedOutcome (or equally exact names); tuples for collections. Preserve callback_query_id only as a separate outcome field for future answerCallbackQuery and never render it.",
+    "Support only OPEN/SELECT_SERVICE, HELP/HELP, SAVED/REQUESTER, RESET/START and ACCEPTED_UNCONFIRMED/ACCEPTED_UNCONFIRMED with semantic_code INQUIRY_ACCEPTED_UNCONFIRMED. Validate every exact kind/screen/data shape before output; do not call result.as_dict or expose adapter metadata, receipt/inquiry ids, draft/version, platform/sender/chat/event, service ids or raw internal values. DETAILS, REVIEW and all other combinations return UNSUPPORTED_SCREEN.",
+    "For SELECT_SERVICE read only the public catalog projection. Validate catalog_version 1..2147483647, services/options, normalized titles, active marker, duration, pricing_mode FIXED_PER_PERSON or NEGOTIATED, integer price minor units and currency. Flatten active options in source service/option order with inactive options excluded and stable zero-based ordinals. Render Russian service title, duration and price; fixed RUB integer minor units as human price with explicit 'за человека', negotiated as 'По договорённости'. Callback data is exactly v1:s:<catalog_version>:<active ordinal>; add rules/contacts button v1:h. Never expose raw ids. If unsafe, return CATALOG_UNAVAILABLE or MESSAGE_TOO_LONG without partial output.",
+    "Render HELP using only provided contact_info, location_link and visit_rules with Russian labels and v1:o; do not invent missing values. Render REQUESTER with 'Как к вам обращаться? Напишите имя одним сообщением.' and only permitted v1:h/v1:r actions. Render RESET with draft-cleared notice and v1:o. Render accepted-unconfirmed with explicit owner handoff and unconfirmed time/admission/payment, plus v1:o; trusted ids and replay metadata must never appear.",
+    "Enforce message length 1..4096 Unicode characters, button label deterministic reasonable bounds, callback_data ASCII/UTF-8 1..64 bytes and accepted v1 grammar. DTOs and errors have stable safe str/repr, renderer does not mutate or retain input, read env, log, use time/random, call HTTP/SDK/persistence or serialize transport.",
+    "Add exhaustive synthetic PublicCatalogRuntime-shaped tests for fixed/negotiated current horse services, prices/durations, active ordinals/callback bounds, malformed/duplicate/empty catalogs and every wrong type/bool/range/currency/pricing/duration/price/title shape; text/button limits; HELP optional fields; REQUESTER/RESET; accepted privacy; callback preservation; immutable DTOs, non-mutation, unsupported screens, safe errors and zero side effects. Export only from __init__.py. Copy this exact contract from primary .pipeline/TG-012-spec.json to tasks/specs/TG-012.json."
+  ],
+  "acceptance": [
+    "Focused renderer tests, all Telegram suites in one pytest invocation, complete pytest, scope review and git diff --check pass.",
+    "Actual diff stays within the approved renderer, exports, tests and task spec paths; no API, conversation, resolver, transport, persistence, config, docs or SDK behavior changes."
+  ],
+  "validation": [
+    {"name": "Telegram renderer tests", "argv": ["{python}", "-m", "pytest", "tests/telegram_rendering", "-q"], "timeout": 120},
+    {"name": "all Telegram suites", "argv": ["{python}", "-m", "pytest", "tests/telegram_rendering", "tests/telegram_screen_actions", "tests/telegram_conversation", "tests/telegram_interactions", "tests/telegram_actions", "tests/telegram_adapter", "-q"], "timeout": 120},
+    {"name": "complete tests", "argv": ["{python}", "-m", "pytest", "-q"], "timeout": 180},
+    {"name": "whitespace", "argv": ["git", "diff", "--check"], "timeout": 10}
+  ],
+  "risk": "medium",
+  "retry_limit": 0,
+  "shared_paths_approval": {"paths": ["apps/bot/sivka_burka_bot/telegram_rendering.py", "apps/bot/sivka_burka_bot/__init__.py", "tests/telegram_rendering/**", "tasks/specs/TG-012.json"], "reviewer": "cloud:codex", "reason": "Add the pure transport-neutral renderer over the reviewed Telegram outcome contract."}
+}
