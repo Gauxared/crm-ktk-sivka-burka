@@ -7,6 +7,7 @@ from .telegram_updates import (
     TelegramUpdateAdapter,
     TelegramUpdateError,
 )
+from .telegram_interactions import TelegramInteractionError, TelegramInteractionMapper, TelegramIntent, TelegramIntentKind
 
 __all__ = [
     "AcceptedTelegramUpdate",
@@ -14,4 +15,8 @@ __all__ = [
     "InputKind",
     "TelegramUpdateAdapter",
     "TelegramUpdateError",
+    "TelegramInteractionError",
+    "TelegramInteractionMapper",
+    "TelegramIntent",
+    "TelegramIntentKind",
 ]
