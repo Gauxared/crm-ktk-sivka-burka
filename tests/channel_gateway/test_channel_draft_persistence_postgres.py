@@ -6,7 +6,7 @@ or a configured runtime database.
 from __future__ import annotations
 
 from pathlib import Path
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from alembic import command
 from alembic.config import Config
@@ -116,10 +116,12 @@ def test_read_catalog_is_public_equivalent_filtered_and_read_only(database):
     vk = gateway.read_catalog(context(Platform.VK)).catalog
     assert telegram == vk
     assert set(telegram) == {"catalog_version", "club_timezone", "contact_info", "location_link", "visit_rules", "services"}
-    assert telegram["services"] == [{"id": str(service_id), "title": "Ride", "description": "Description", "information": "Information", "options": [
+    expected_options = [
         {"id": str(fixed_id), "duration_minutes": 60, "pricing_mode": "FIXED_PER_PERSON", "price_minor": 12500, "currency": "RUB"},
         {"id": str(negotiated_id), "duration_minutes": None, "pricing_mode": "NEGOTIATED", "price_minor": None, "currency": "RUB"},
-    ]}]
+    ]
+    expected_options.sort(key=lambda option: UUID(option["id"]))
+    assert telegram["services"] == [{"id": str(service_id), "title": "Ride", "description": "Description", "information": "Information", "options": expected_options}]
     after = snapshot()
     assert after == before
 

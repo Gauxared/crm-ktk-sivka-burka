@@ -1,0 +1,53 @@
+{
+  "id": "TG-014",
+  "title": "Stabilize PostgreSQL catalog ordering evidence",
+  "type": "repair",
+  "status": "BACKLOG",
+  "priority": "high",
+  "executor": {"preferred": "cloud", "fallback": "cloud"},
+  "reviewer": "cloud",
+  "shared_paths_approval": {
+    "paths": ["tasks/specs/TG-014.json"],
+    "reviewer": "cloud:codex",
+    "reason": "Accepted test-only repair records its exact task contract in the shared specification registry."
+  },
+  "depends_on": ["TG-013"],
+  "context": [
+    "AGENTS.md",
+    "docs/development-pipeline.md",
+    "tasks/specs/TG-013.json",
+    "apps/api/sivka_burka_api/public_catalog.py",
+    "tests/channel_gateway/test_channel_draft_persistence_postgres.py"
+  ],
+  "allowed_paths": [
+    "tests/channel_gateway/test_channel_draft_persistence_postgres.py",
+    "tasks/specs/TG-014.json"
+  ],
+  "forbidden_paths": [
+    ".env",
+    ".env.*",
+    "apps/**",
+    "alembic/**",
+    "docs/**",
+    "scripts/**",
+    "config/**",
+    "pyproject.toml"
+  ],
+  "requirements": [
+    "Repair only the flaky PostgreSQL catalog assertion: derive the expected active option order from the production ORDER BY service_options.id contract rather than random uuid4 insertion order.",
+    "Keep production code and SQL unchanged, preserve all public catalog field/value assertions, and keep the test read-only evidence intact.",
+    "Commit this exact accepted task specification at tasks/specs/TG-014.json."
+  ],
+  "acceptance": [
+    "The formerly flaky node passes repeatedly across fresh random UUID values.",
+    "Channel gateway/conversation and full pytest gates pass; git diff --check passes; diff contains only the two allowed files."
+  ],
+  "validation": [
+    {"name": "catalog ordering regression", "argv": ["{python}", "-m", "pytest", "tests/channel_gateway/test_channel_draft_persistence_postgres.py::test_read_catalog_is_public_equivalent_filtered_and_read_only", "-q"], "timeout": 120},
+    {"name": "channel regressions", "argv": ["{python}", "-m", "pytest", "tests/channel_gateway", "tests/channel_conversation", "-q"], "timeout": 180},
+    {"name": "full pytest", "argv": ["{python}", "-m", "pytest", "-q"], "timeout": 180},
+    {"name": "whitespace", "argv": ["git", "diff", "--check"], "timeout": 10}
+  ],
+  "risk": "low",
+  "retry_limit": 0
+}
