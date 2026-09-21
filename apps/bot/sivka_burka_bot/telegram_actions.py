@@ -61,7 +61,7 @@ def _intent(intent: Any) -> TelegramIntent:
     _context(intent.context)
     if type(intent.kind) is not TelegramIntentKind:
         raise _fail("INVALID_INTENT")
-    if not isinstance(intent.payload, Mapping):
+    if type(intent.payload) is not MappingProxyType:
         raise _fail("INVALID_INTENT")
     callback_id = intent.callback_query_id
     if callback_id is not None and (
@@ -97,10 +97,35 @@ def _normalized_id(value: Any) -> bool:
 def _catalog_version(catalog: Any) -> int:
     if not isinstance(catalog, Mapping):
         raise _fail("CATALOG_UNAVAILABLE")
-    version = catalog.get("version")
+    version = catalog.get("catalog_version")
     if not _integer(version):
         raise _fail("CATALOG_UNAVAILABLE")
     return version
+
+
+def _text_payload(payload: Mapping[str, Any], callback_id: str | None) -> None:
+    if set(payload) != {"text"} or callback_id is not None:
+        raise _fail("INVALID_INTENT")
+    text = payload.get("text")
+    if (
+        not isinstance(text, str)
+        or not text
+        or text.strip() != text
+        or len(text) > 4096
+    ):
+        raise _fail("INVALID_INTENT")
+
+
+def _select_payload(payload: Mapping[str, Any], callback_id: str | None) -> tuple[int, int]:
+    if set(payload) != {"catalog_version", "option_ordinal"}:
+        raise _fail("INVALID_INTENT")
+    if callback_id is None:
+        raise _fail("INVALID_INTENT")
+    callback_version = payload.get("catalog_version")
+    ordinal = payload.get("option_ordinal")
+    if not _integer(callback_version) or not _integer(ordinal, minimum=0):
+        raise _fail("INVALID_INTENT")
+    return callback_version, ordinal
 
 
 def _active_options(catalog: Any) -> tuple[int, tuple[str, ...]]:
@@ -143,15 +168,11 @@ class TelegramActionResolver:
             _empty_payload(intent.payload)
             return ChannelAction(_DIRECT[kind], MappingProxyType({}))
         if kind is TelegramIntentKind.TEXT_INPUT:
+            _text_payload(intent.payload, intent.callback_query_id)
             raise _fail("SCREEN_REQUIRED")
         if kind is not TelegramIntentKind.SELECT_SERVICE:
             raise _fail("INVALID_INTENT")
-        if set(intent.payload) != {"catalog_version", "option_ordinal"}:
-            raise _fail("INVALID_INTENT")
-        callback_version = intent.payload.get("catalog_version")
-        ordinal = intent.payload.get("option_ordinal")
-        if not _integer(callback_version) or not _integer(ordinal, minimum=0):
-            raise _fail("INVALID_INTENT")
+        callback_version, ordinal = _select_payload(intent.payload, intent.callback_query_id)
         live_version, option_ids = _active_options(catalog)
         if live_version != callback_version:
             raise _fail("STALE_CATALOG")
