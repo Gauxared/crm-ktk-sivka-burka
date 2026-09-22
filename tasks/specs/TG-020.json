@@ -1,0 +1,35 @@
+{
+  "id": "TG-020",
+  "title": "Normalize exact task specification bytes",
+  "type": "repair",
+  "status": "BACKLOG",
+  "priority": "high",
+  "executor": {"preferred": "cloud", "fallback": "cloud"},
+  "reviewer": "cloud",
+  "shared_paths_approval": {
+    "paths": ["tasks/specs/TG-019.json", "tasks/specs/TG-020.json"],
+    "reviewer": "cloud:codex",
+    "reason": "Remove the trailing blank line missed for an untracked task spec and prove exact registered bytes before publication."
+  },
+  "depends_on": ["TG-019"],
+  "context": ["AGENTS.md", "docs/development-pipeline.md", "tasks/specs/TG-018.json", "tasks/specs/TG-019.json"],
+  "allowed_paths": ["tasks/specs/TG-019.json", "tasks/specs/TG-020.json"],
+  "forbidden_paths": [".env", ".env.local", ".env.example", "alembic/**", "apps/**", "tests/**", "docs/**", "scripts/**", "config/**", "pyproject.toml"],
+  "requirements": [
+    "Replace tasks/specs/TG-019.json with a byte-for-byte copy of the registered primary-checkout .pipeline/TG-019-spec.json, removing the extra blank line at EOF.",
+    "Commit a byte-for-byte copy of this registered .pipeline/TG-020-spec.json at tasks/specs/TG-020.json.",
+    "Do not change product code, tests, configuration, documentation or any other task specification."
+  ],
+  "acceptance": [
+    "Both committed specification files are byte-for-byte identical to their registered primary-checkout sources.",
+    "Both files are valid JSON and the diff contains only the two allowed specification files.",
+    "Whitespace validation over the resulting committed range reports no errors."
+  ],
+  "validation": [
+    {"name": "exact registered bytes", "argv": ["{python}", "-c", "from pathlib import Path; assert Path('tasks/specs/TG-019.json').read_bytes() == Path('../../.pipeline/TG-019-spec.json').read_bytes(); assert Path('tasks/specs/TG-020.json').read_bytes() == Path('../../.pipeline/TG-020-spec.json').read_bytes()"], "timeout": 10},
+    {"name": "valid JSON", "argv": ["{python}", "-c", "import json,pathlib; json.loads(pathlib.Path('tasks/specs/TG-019.json').read_text(encoding='utf-8')); json.loads(pathlib.Path('tasks/specs/TG-020.json').read_text(encoding='utf-8'))"], "timeout": 10},
+    {"name": "whitespace", "argv": ["git", "diff", "--check"], "timeout": 10}
+  ],
+  "risk": "low",
+  "retry_limit": 0
+}
