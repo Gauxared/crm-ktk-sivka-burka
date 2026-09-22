@@ -1,0 +1,93 @@
+{
+  "id": "TG-016",
+  "title": "Repair and prove the Telegram webhook vertical slice",
+  "type": "repair",
+  "status": "BACKLOG",
+  "priority": "high",
+  "executor": {"preferred": "cloud", "fallback": "cloud"},
+  "reviewer": "cloud",
+  "shared_paths_approval": {
+    "paths": [
+      "apps/api/sivka_burka_api/main.py",
+      "apps/api/sivka_burka_api/channel_gateway.py",
+      "apps/api/sivka_burka_api/channel_draft_persistence.py",
+      "apps/bot/sivka_burka_bot/telegram_conversation.py",
+      "apps/bot/sivka_burka_bot/telegram_runtime.py",
+      "apps/bot/sivka_burka_bot/telegram_transport.py",
+      "tests/channel_gateway/**",
+      "tests/telegram_transport/**",
+      "tests/telegram_webhook/**",
+      "tasks/specs/TG-016.json",
+      "pyproject.toml"
+    ],
+    "reviewer": "cloud:codex",
+    "reason": "Lead review rejected TG-015 evidence; this repair is required before publication because the production dependency and actual PostgreSQL route/retry acceptance were not implemented or tested."
+  },
+  "depends_on": ["TG-015"],
+  "context": [
+    "AGENTS.md",
+    "docs/development-pipeline.md",
+    "docs/api.md",
+    "docs/notifications.md",
+    "tasks/specs/TG-015.json",
+    "apps/api/sivka_burka_api/main.py",
+    "apps/api/sivka_burka_api/channel_gateway.py",
+    "apps/api/sivka_burka_api/channel_draft_persistence.py",
+    "apps/api/sivka_burka_api/channel_identity.py",
+    "apps/bot/sivka_burka_bot/telegram_runtime.py",
+    "apps/bot/sivka_burka_bot/telegram_transport.py",
+    "tests/channel_gateway/test_channel_submission_postgres.py"
+  ],
+  "allowed_paths": [
+    "apps/api/sivka_burka_api/main.py",
+    "apps/api/sivka_burka_api/channel_gateway.py",
+    "apps/api/sivka_burka_api/channel_draft_persistence.py",
+    "apps/bot/sivka_burka_bot/telegram_conversation.py",
+    "apps/bot/sivka_burka_bot/telegram_runtime.py",
+    "apps/bot/sivka_burka_bot/telegram_transport.py",
+    "tests/channel_gateway/**",
+    "tests/telegram_transport/**",
+    "tests/telegram_webhook/**",
+    "tasks/specs/TG-016.json",
+    "pyproject.toml"
+  ],
+  "forbidden_paths": [
+    ".env",
+    ".env.*",
+    "alembic/**",
+    "apps/api/sivka_burka_api/channel_identity.py",
+    "apps/api/sivka_burka_api/inquiries.py",
+    "apps/api/sivka_burka_api/public_submission.py",
+    "apps/api/sivka_burka_api/public_catalog.py",
+    "apps/web/**",
+    "docs/**",
+    "scripts/**",
+    "config/**"
+  ],
+  "requirements": [
+    "Move httpx==0.28.1 into project.dependencies because production Telegram modules import it; keep pytest in the dev extra and add a packaging-contract test that proves the bot package is discovered and every imported third-party runtime dependency is declared without dev extras.",
+    "Harden TelegramBotApiClient: accept only a syntactically bounded runtime token, keep token/provider material out of repr, str, exception cause and exception context, keep the origin and method allowlist fixed, and validate method-specific success results (answerCallbackQuery requires result true; sendMessage requires a Message-like mapping with a non-bool integer message_id). Missing/malformed result is a safe provider failure.",
+    "Preserve retry_after only as validated positive provider metadata. Network, timeout, invalid JSON, 5xx, 429 and malformed success/errors must raise typed safe failures with no token, URL, response body or Telegram description reachable through the surfaced exception chain.",
+    "Repair the HTTP boundary so processing/persistence/rendering failures are temporary 503 responses, authentication remains 401, malformed authenticated updates remain 400, invalid media is 415, oversize is 413, and the 256 KiB cap is enforced while streaming rather than after unbounded body buffering. All responses remain no-store.",
+    "Add focused TelegramWebhookRuntime tests proving ignored updates do not provision identity or call Telegram, accepted private updates provision identity before orchestration, callback acknowledgement happens before sendMessage, chat_id comes only from trusted context, and keyboard JSON is built only from reviewed renderer buttons.",
+    "Add disposable PostgreSQL FastAPI end-to-end tests using the actual TelegramUpdateAdapter, ChannelIdentityService, PostgresChannelDraftPort, ChannelGateway, ChannelConversation, Telegram orchestrator/renderer/runtime and an httpx MockTransport. Drive /start, service callback, requester, details and submit through the real webhook route and prove exactly one contact identity, inquiry, terms, closed draft, submit receipt, audit event and owner notification job.",
+    "In the PostgreSQL route tests, simulate sendMessage failure after a committed SAVE and after a committed SUBMIT; retry the exact same Telegram update and prove the durable event lookup renders/delivers safely without a second draft mutation, inquiry, operation receipt, channel event, audit event or notification job. Prove callback acknowledgement precedes every callback sendMessage.",
+    "Add negative replay evidence: reusing a committed update_id with a different interaction must not be treated as a successful replay or create/deliver a different business result. Tighten the privacy-preserving replay marker/validation within existing schema if needed; do not persist raw updates, sender/chat IDs, bot tokens or rendered messages in receipt markers.",
+    "Do not add real credentials, environment configuration, live Telegram calls, schema changes, webhook registration, polling, VK, owner delivery worker, frontend or deployment. The default unconfigured app may remain 503; this task proves the injected composition. Commit this exact task specification at tasks/specs/TG-016.json."
+  ],
+  "acceptance": [
+    "A production dependency install contains all imports required to load both API and bot packages.",
+    "The real injected FastAPI/PostgreSQL Telegram funnel reaches one CRM inquiry and safe owner-notification intent through mocked outbound HTTP only.",
+    "Exact update retries after committed SAVE and SUBMIT are safe; altered reuse is rejected; provider and processing failures expose no sensitive material.",
+    "Focused transport/runtime/webhook, PostgreSQL E2E, channel regression, all Telegram, full pytest and whitespace gates pass; self-review cites the actual database row-count evidence and exception-chain checks."
+  ],
+  "validation": [
+    {"name": "Telegram transport runtime webhook", "argv": ["{python}", "-m", "pytest", "tests/telegram_transport", "tests/telegram_webhook", "-q"], "timeout": 240},
+    {"name": "channel regressions", "argv": ["{python}", "-m", "pytest", "tests/channel_gateway", "tests/channel_conversation", "-q"], "timeout": 180},
+    {"name": "all Telegram suites", "argv": ["{python}", "-m", "pytest", "tests/telegram_adapter", "tests/telegram_interactions", "tests/telegram_actions", "tests/telegram_screen_actions", "tests/telegram_conversation", "tests/telegram_rendering", "tests/telegram_funnel", "tests/telegram_transport", "tests/telegram_webhook", "-q"], "timeout": 300},
+    {"name": "full pytest", "argv": ["{python}", "-m", "pytest", "-q"], "timeout": 300},
+    {"name": "whitespace", "argv": ["git", "diff", "--check"], "timeout": 10}
+  ],
+  "risk": "high",
+  "retry_limit": 0
+}

@@ -215,6 +215,7 @@ class PostgresChannelDraftPort:
                 "kind": "SUBMIT",
                 "receipt_id": str(receipt_id),
                 "inquiry_id": str(inquiry_id),
+                **self._interaction_marker(context),
             }
             connection.execute(text("""INSERT INTO operation_receipts
                 (id, scope_kind, scope_id, method, canonical_path, key_digest, payload_digest,
@@ -294,13 +295,21 @@ class PostgresChannelDraftPort:
         context = validate_context(context)
         digest = _digest(self.hmac_secret, context.event_id.encode("utf-8"))
         with self.engine.connect() as connection:
-            row = connection.execute(text("""SELECT outcome_kind FROM channel_events
-                WHERE platform=:platform AND integration_id=:integration_id
+            row = connection.execute(text("""SELECT e.outcome_kind, r.result_json FROM channel_events e
+                LEFT JOIN operation_receipts r ON r.id=e.receipt_id
+                WHERE e.platform=:platform AND e.integration_id=:integration_id
                   AND event_key_digest=:event_digest"""), {
                 "platform": context.platform.value, "integration_id": context.integration_id,
                 "event_digest": digest,
             }).mappings().one_or_none()
-        return None if row is None else {"kind": str(row["outcome_kind"])}
+        if row is None:
+            return None
+        if context.event_fingerprint is not None:
+            marker = row["result_json"].get("interaction_marker") if isinstance(row["result_json"], Mapping) else None
+            candidate = _digest(self.hmac_secret, context.event_fingerprint).hex()
+            if not isinstance(marker, str) or not hmac.compare_digest(marker, candidate):
+                raise GatewayError("IDEMPOTENCY_MISMATCH")
+        return {"kind": str(row["outcome_kind"])}
 
     def save_draft(self, context: ChannelContext, expected_version: int, answers: Mapping[str, Any], step: str, event_id: str) -> DraftSaved:
         operation = {"kind": "SAVE", "expected_version": expected_version, "answers": dict(answers), "step": step}
@@ -357,14 +366,14 @@ class PostgresChannelDraftPort:
                         SET version=:version, answers=CAST(:answers AS jsonb), step=:step, expires_at=:expires_at
                         WHERE id=:id"""), {"version": version, "answers": _canonical(operation["answers"]).decode("utf-8"),
                                              "step": operation["step"], "expires_at": now + self.draft_ttl, "id": draft["id"]})
-                result: dict[str, Any] = {"kind": "SAVE", "version": version, "step": operation["step"]}
+                result: dict[str, Any] = {"kind": "SAVE", "version": version, "step": operation["step"], **self._interaction_marker(context)}
             else:
                 if draft is None or int(draft["version"]) != operation["expected_version"]:
                     raise GatewayError("VERSION_CONFLICT")
                 version = int(draft["version"]) + 1
                 connection.execute(text("UPDATE conversation_drafts SET version=:version, closed_at=:now WHERE id=:id"),
                                    {"version": version, "now": now, "id": draft["id"]})
-                result = {"kind": "RESET", "version": version}
+                result = {"kind": "RESET", "version": version, **self._interaction_marker(context)}
 
             receipt_id = uuid4()
             connection.execute(text("""INSERT INTO operation_receipts
@@ -416,3 +425,8 @@ class PostgresChannelDraftPort:
         if prior["tombstoned_at"] is not None or prior["result_json"] is None:
             raise GatewayError("RESULT_EXPIRED")
         return dict(prior["result_json"])
+
+    def _interaction_marker(self, context: ChannelContext) -> dict[str, str]:
+        if context.event_fingerprint is None:
+            return {}
+        return {"interaction_marker": _digest(self.hmac_secret, context.event_fingerprint).hex()}

@@ -104,9 +104,13 @@ def create_app(*, public_submission_runtime: PublicSubmissionRuntime | None = No
         if request.headers.get("content-type", "").split(";", 1)[0].strip().lower() != "application/json":
             return _error("UNSUPPORTED_MEDIA_TYPE", 415)
         try:
-            raw = await request.body()
-            if len(raw) > 256 * 1024:
-                return _error("REQUEST_TOO_LARGE", 413)
+            chunks, total = [], 0
+            async for chunk in request.stream():
+                total += len(chunk)
+                if total > 256 * 1024:
+                    return _error("REQUEST_TOO_LARGE", 413)
+                chunks.append(chunk)
+            raw = b"".join(chunks)
             payload = json.loads(raw)
             if not isinstance(payload, dict):
                 return _error("INVALID_REQUEST", 400)
@@ -114,7 +118,7 @@ def create_app(*, public_submission_runtime: PublicSubmissionRuntime | None = No
                 request.headers.get("X-Telegram-Bot-Api-Secret-Token"), payload
             )
         except TelegramWebhookError as error:
-            return _error("UNAUTHORIZED" if error.code == "UNAUTHORIZED" else "INVALID_REQUEST", 401 if error.code == "UNAUTHORIZED" else 400)
+            return _error("UNAUTHORIZED", 401) if error.code == "UNAUTHORIZED" else (_error("INVALID_REQUEST", 400) if error.code == "MALFORMED_UPDATE" else _error("TELEGRAM_PROCESSING_UNAVAILABLE", 503))
         except TelegramTransportError as error:
             return _error("RATE_LIMITED" if error.code == "RATE_LIMITED" else "TELEGRAM_TEMPORARY_FAILURE", 503)
         except (UnicodeDecodeError, json.JSONDecodeError):
