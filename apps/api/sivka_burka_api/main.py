@@ -24,6 +24,10 @@ from .admin_inquiries import AdminInquiryReadRuntime, AdminInquiryReader, Invali
 from .admin_visits import AdminVisitReadRuntime, AdminVisitReader, InvalidVisitCursor
 from .owner_commands import IdempotencyMismatch as OwnerIdempotencyMismatch, OwnerCommandError
 from .settings import load_settings
+from .db import database_url_from_environment
+from apps.bot.sivka_burka_bot.telegram_composition import compose_telegram_webhook_runtime
+import httpx
+from sqlalchemy import create_engine
 from apps.bot.sivka_burka_bot.telegram_runtime import TelegramWebhookError, TelegramWebhookRuntime
 from apps.bot.sivka_burka_bot.telegram_transport import TelegramTransportError
 
@@ -91,6 +95,21 @@ def _map_command_error(error: InquiryCommandError) -> JSONResponse:
 def create_app(*, public_submission_runtime: PublicSubmissionRuntime | None = None, public_catalog_runtime: PublicCatalogRuntime | None = None, admin_session_runtime: AdminSessionRuntime | None = None, admin_command_runtime: AdminCommandRuntime | None = None, admin_inquiry_read_runtime: AdminInquiryReadRuntime | None = None, admin_visit_read_runtime: AdminVisitReadRuntime | None = None, telegram_webhook_runtime: TelegramWebhookRuntime | None = None) -> FastAPI:
     settings = load_settings()
     app = FastAPI(title="Sivka-Burka API", version="0.1.0")
+    owned_telegram_client: httpx.AsyncClient | None = None
+    owned_telegram_engine = None
+    if telegram_webhook_runtime is None and settings.telegram.enabled:
+        owned_telegram_engine = create_engine(database_url_from_environment())
+        composed = compose_telegram_webhook_runtime(settings.telegram, owned_telegram_engine)
+        telegram_webhook_runtime = composed.runtime
+        if composed.owns_client:
+            owned_telegram_client = composed.client
+
+    @app.on_event("shutdown")
+    async def close_owned_telegram_resources() -> None:
+        if owned_telegram_client is not None:
+            await owned_telegram_client.aclose()
+        if owned_telegram_engine is not None:
+            owned_telegram_engine.dispose()
 
     @app.get("/health", tags=["operations"])
     def health() -> dict[str, str]:
