@@ -27,7 +27,7 @@ from .settings import load_settings
 from .db import database_url_from_environment
 from apps.bot.sivka_burka_bot.telegram_composition import compose_telegram_webhook_runtime
 import httpx
-from sqlalchemy import create_engine
+from sqlalchemy import Engine, create_engine
 from apps.bot.sivka_burka_bot.telegram_runtime import TelegramWebhookError, TelegramWebhookRuntime
 from apps.bot.sivka_burka_bot.telegram_transport import TelegramTransportError
 
@@ -92,14 +92,19 @@ def _map_command_error(error: InquiryCommandError) -> JSONResponse:
     return _error("INVALID_REQUEST", 400)
 
 
-def create_app(*, public_submission_runtime: PublicSubmissionRuntime | None = None, public_catalog_runtime: PublicCatalogRuntime | None = None, admin_session_runtime: AdminSessionRuntime | None = None, admin_command_runtime: AdminCommandRuntime | None = None, admin_inquiry_read_runtime: AdminInquiryReadRuntime | None = None, admin_visit_read_runtime: AdminVisitReadRuntime | None = None, telegram_webhook_runtime: TelegramWebhookRuntime | None = None) -> FastAPI:
+def create_app(*, public_submission_runtime: PublicSubmissionRuntime | None = None, public_catalog_runtime: PublicCatalogRuntime | None = None, admin_session_runtime: AdminSessionRuntime | None = None, admin_command_runtime: AdminCommandRuntime | None = None, admin_inquiry_read_runtime: AdminInquiryReadRuntime | None = None, admin_visit_read_runtime: AdminVisitReadRuntime | None = None, telegram_webhook_runtime: TelegramWebhookRuntime | None = None, telegram_engine: Engine | None = None, telegram_http_client: httpx.AsyncClient | None = None) -> FastAPI:
     settings = load_settings()
     app = FastAPI(title="Sivka-Burka API", version="0.1.0")
     owned_telegram_client: httpx.AsyncClient | None = None
     owned_telegram_engine = None
     if telegram_webhook_runtime is None and settings.telegram.enabled:
-        owned_telegram_engine = create_engine(database_url_from_environment())
-        composed = compose_telegram_webhook_runtime(settings.telegram, owned_telegram_engine)
+        composition_engine = telegram_engine if telegram_engine is not None else create_engine(database_url_from_environment())
+        if telegram_engine is None:
+            owned_telegram_engine = composition_engine
+        if telegram_http_client is None:
+            composed = compose_telegram_webhook_runtime(settings.telegram, composition_engine)
+        else:
+            composed = compose_telegram_webhook_runtime(settings.telegram, composition_engine, telegram_http_client)
         telegram_webhook_runtime = composed.runtime
         if composed.owns_client:
             owned_telegram_client = composed.client
