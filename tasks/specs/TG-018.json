@@ -1,5 +1,39 @@
-Get-Content: 
-Line |
-   2 |  Get-Content -Raw tasks/specs/TG-018.json
-     |  ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-     | Cannot find path 'C:\Users\orlov\OneDrive\Документы\ChatGPT\CRM KTK Sivka-burka\tasks\specs\TG-018.json' because it does not exist.
+{
+  "id": "TG-018",
+  "title": "Prove configured Telegram composition on PostgreSQL",
+  "type": "repair",
+  "status": "BACKLOG",
+  "priority": "high",
+  "executor": {"preferred": "cloud", "fallback": "cloud"},
+  "reviewer": "cloud",
+  "shared_paths_approval": {
+    "paths": ["apps/api/sivka_burka_api/main.py", "apps/api/sivka_burka_api/settings.py", "apps/bot/sivka_burka_bot/telegram_composition.py", "tests/telegram_composition/**", "tasks/specs/TG-018.json"],
+    "reviewer": "cloud:codex",
+    "reason": "Repair the missing TG-017 acceptance evidence with a real configured PostgreSQL webhook smoke and only the minimal composition seam needed for synthetic HTTP transport."
+  },
+  "depends_on": ["TG-017"],
+  "context": ["AGENTS.md", "docs/development-pipeline.md", "tasks/specs/TG-017.json", "apps/api/sivka_burka_api/main.py", "apps/api/sivka_burka_api/settings.py", "apps/api/sivka_burka_api/db.py", "apps/bot/sivka_burka_bot/telegram_composition.py", "apps/bot/sivka_burka_bot/telegram_runtime.py", "tests/telegram_composition/test_composition.py", "tests/telegram_webhook/test_postgres_e2e.py"],
+  "allowed_paths": ["apps/api/sivka_burka_api/main.py", "apps/api/sivka_burka_api/settings.py", "apps/bot/sivka_burka_bot/telegram_composition.py", "tests/telegram_composition/**", "tasks/specs/TG-018.json"],
+  "forbidden_paths": [".env", ".env.local", ".env.example", "alembic/**", "apps/api/sivka_burka_api/channel_gateway.py", "apps/api/sivka_burka_api/channel_draft_persistence.py", "apps/api/sivka_burka_api/channel_identity.py", "apps/api/sivka_burka_api/inquiries.py", "apps/web/**", "docs/**", "scripts/**", "config/**", "pyproject.toml"],
+  "requirements": [
+    "Add a disposable PostgreSQL integration test under tests/telegram_composition that enables the Telegram environment settings and calls create_app() without injecting telegram_webhook_runtime or replacing the composition factory/runtime.",
+    "The test must apply the real migrations, use the real composition chain and webhook route, replace only outbound Telegram HTTP with httpx MockTransport, submit at least a valid /start update, and prove both the expected Bot API send and durable channel identity state in PostgreSQL.",
+    "Prove that resources created by application composition are closed exactly once when the TestClient lifespan ends. Preserve explicit runtime injection precedence and never close an HTTP client or Engine supplied by a caller.",
+    "If a minimal testability seam is needed, keep it explicit and typed in create_app or the composition factory without duplicating business rules. Do not use SQLite as acceptance evidence and do not make any live network request.",
+    "Retain fail-closed and secret-safe configuration behavior. Add a focused negative assertion if the new seam exposes any startup or ownership edge case.",
+    "Do not add webhook registration, polling, workers, VK, deployment, migrations, frontend or documentation. Commit this exact task specification at tasks/specs/TG-018.json."
+  ],
+  "acceptance": [
+    "The automatic configured path from environment through create_app, the real composition factory, webhook runtime and PostgreSQL is exercised without manual runtime assembly.",
+    "MockTransport observes the expected Telegram Bot API call, PostgreSQL contains the created identity state, and owned-resource shutdown is demonstrated.",
+    "Focused composition, Telegram regression, full pytest and whitespace gates pass within allowed scope."
+  ],
+  "validation": [
+    {"name": "Telegram composition", "argv": ["{python}", "-m", "pytest", "tests/telegram_composition", "tests/api/test_settings.py", "tests/api/test_health.py", "-q"], "timeout": 300},
+    {"name": "Telegram regressions", "argv": ["{python}", "-m", "pytest", "tests/telegram_adapter", "tests/telegram_interactions", "tests/telegram_actions", "tests/telegram_screen_actions", "tests/telegram_conversation", "tests/telegram_rendering", "tests/telegram_funnel", "tests/telegram_transport", "tests/telegram_webhook", "-q"], "timeout": 300},
+    {"name": "full pytest", "argv": ["{python}", "-m", "pytest", "-q"], "timeout": 300},
+    {"name": "whitespace", "argv": ["git", "diff", "--check"], "timeout": 10}
+  ],
+  "risk": "high",
+  "retry_limit": 0
+}
