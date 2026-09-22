@@ -1,7 +1,7 @@
 """Small, injected Telegram Bot API boundary with deliberately safe failures."""
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Mapping
 
 import httpx
@@ -22,7 +22,7 @@ class TelegramTransportError(RuntimeError):
 
 
 def _token(value: object) -> str:
-    if (not isinstance(value, str) or not 10 <= len(value) <= 128 or value != value.strip() or "\x00" in value or value.count(":") != 1 or not value.partition(":")[0].isdigit() or not value.partition(":")[2].replace("-", "").replace("_", "").isalnum()):
+    if (not isinstance(value, str) or not 10 <= len(value) <= 128 or value != value.strip() or "\x00" in value or value.count(":") != 1 or not value.partition(":")[0].isdigit() or not value.partition(":")[2].isascii() or not value.partition(":")[2].replace("-", "").replace("_", "").isalnum()):
         raise ValueError("Invalid Telegram runtime token")
     return value
 
@@ -39,8 +39,8 @@ def _retry_after(value: object) -> int | None:
 class TelegramBotApiClient:
     """Only exposes the two bot calls used by the application runtime."""
 
-    token: str
-    client: httpx.AsyncClient
+    token: str = field(repr=False)
+    client: httpx.AsyncClient = field(repr=False)
 
     def __post_init__(self) -> None:
         self.token = _token(self.token)
@@ -60,13 +60,18 @@ class TelegramBotApiClient:
         await self._call("sendMessage", {"chat_id": chat_id, "text": text, "reply_markup": dict(reply_markup)})
 
     async def _call(self, method: str, payload: Mapping[str, Any]) -> None:
+        failure: TelegramTransportError | None = None
         try:
             response = await self.client.post(
                 f"https://api.telegram.org/bot{self.token}/{method}", json=dict(payload), timeout=15.0
             )
             body = response.json()
         except Exception:
-            raise TelegramTransportError("PROVIDER_UNAVAILABLE") from None
+            failure = TelegramTransportError("PROVIDER_UNAVAILABLE")
+        if failure is not None:
+            # Raise outside the provider exception handler so even an inspected
+            # exception chain cannot expose the token-bearing request URL.
+            raise failure
         if not isinstance(body, Mapping):
             raise TelegramTransportError("MALFORMED_PROVIDER_RESPONSE") from None
         if response.status_code != 200 or body.get("ok") is not True:
