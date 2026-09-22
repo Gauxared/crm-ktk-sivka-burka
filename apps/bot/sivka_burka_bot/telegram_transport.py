@@ -22,7 +22,7 @@ class TelegramTransportError(RuntimeError):
 
 
 def _token(value: object) -> str:
-    if not isinstance(value, str) or not value or len(value) > 256 or value != value.strip() or "\x00" in value:
+    if (not isinstance(value, str) or not 10 <= len(value) <= 128 or value != value.strip() or "\x00" in value or value.count(":") != 1 or not value.partition(":")[0].isdigit() or not value.partition(":")[2].replace("-", "").replace("_", "").isalnum()):
         raise ValueError("Invalid Telegram runtime token")
     return value
 
@@ -71,3 +71,7 @@ class TelegramBotApiClient:
             raise TelegramTransportError("MALFORMED_PROVIDER_RESPONSE") from None
         if response.status_code != 200 or body.get("ok") is not True:
             raise TelegramTransportError("RATE_LIMITED" if response.status_code == 429 else "PROVIDER_UNAVAILABLE", retry_after=_retry_after(body)) from None
+        result = body.get("result")
+        valid = result is True if method == "answerCallbackQuery" else isinstance(result, Mapping) and isinstance(result.get("message_id"), int) and not isinstance(result.get("message_id"), bool)
+        if not valid:
+            raise TelegramTransportError("MALFORMED_PROVIDER_RESPONSE") from None

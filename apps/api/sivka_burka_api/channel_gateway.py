@@ -31,6 +31,7 @@ class ChannelContext:
     external_sender_id: str
     conversation_id: str
     event_id: str
+    event_fingerprint: bytes | None = None
 
     def namespace(self) -> tuple[str, str, str, str]:
         return (self.platform.value, self.integration_id, self.external_sender_id, self.conversation_id)
@@ -181,6 +182,8 @@ def validate_context(context: ChannelContext) -> ChannelContext:
         raise GatewayError("INVALID_CONTEXT")
     for field in _ID_FIELDS:
         _id(getattr(context, field), field)
+    if context.event_fingerprint is not None and (not isinstance(context.event_fingerprint, bytes) or len(context.event_fingerprint) != 32):
+        raise GatewayError("INVALID_CONTEXT")
     return context
 
 

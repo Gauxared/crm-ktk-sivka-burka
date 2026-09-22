@@ -1,7 +1,9 @@
 """Application runtime joining authenticated Telegram updates to the reviewed funnel."""
 from __future__ import annotations
 
-from dataclasses import dataclass
+import hashlib
+import json
+from dataclasses import dataclass, replace
 from typing import Any
 
 from apps.api.sivka_burka_api.channel_identity import ChannelIdentityService, ChannelIdentityError
@@ -42,6 +44,9 @@ class TelegramWebhookRuntime:
         if not isinstance(update, AcceptedTelegramUpdate):
             raise TelegramWebhookError("MALFORMED_UPDATE")
         try:
+            interaction = {"kind": update.input_kind.value, "text": update.text, "data": update.data, "callback_query_id": update.callback_query_id}
+            fingerprint = hashlib.sha256(json.dumps(interaction, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")).digest()
+            update = replace(update, context=replace(update.context, event_fingerprint=fingerprint))
             self.identities.ensure(update.context)
             rendered = self.renderer.render(self.orchestrator.handle(update))
         except (ChannelIdentityError, ValueError):
