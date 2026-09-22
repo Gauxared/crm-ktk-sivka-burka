@@ -1,0 +1,36 @@
+{
+  "id": "TG-019",
+  "title": "Restore the exact TG-018 task specification",
+  "type": "repair",
+  "status": "BACKLOG",
+  "priority": "high",
+  "executor": {"preferred": "cloud", "fallback": "cloud"},
+  "reviewer": "cloud",
+  "shared_paths_approval": {
+    "paths": ["tasks/specs/TG-018.json", "tasks/specs/TG-019.json"],
+    "reviewer": "cloud:codex",
+    "reason": "Repair the corrupted committed TG-018 specification without changing accepted product code or tests."
+  },
+  "depends_on": ["TG-018"],
+  "context": ["AGENTS.md", "docs/development-pipeline.md", "tasks/specs/TG-017.json", "tasks/specs/TG-018.json"],
+  "allowed_paths": ["tasks/specs/TG-018.json", "tasks/specs/TG-019.json"],
+  "forbidden_paths": [".env", ".env.local", ".env.example", "alembic/**", "apps/**", "tests/**", "docs/**", "scripts/**", "config/**", "pyproject.toml"],
+  "requirements": [
+    "Replace the corrupted tasks/specs/TG-018.json PowerShell error text with an exact JSON copy of the registered TG-018 specification from the primary checkout .pipeline/TG-018-spec.json.",
+    "Commit this exact TG-019 task specification at tasks/specs/TG-019.json.",
+    "Do not change product code, tests, configuration, documentation or any other task specification."
+  ],
+  "acceptance": [
+    "tasks/specs/TG-018.json is valid JSON and is structurally identical to the registered .pipeline/TG-018-spec.json.",
+    "tasks/specs/TG-019.json is valid JSON and matches this registered specification.",
+    "The diff contains only the two allowed specification files and passes whitespace validation."
+  ],
+  "validation": [
+    {"name": "TG-018 exact spec", "argv": ["{python}", "-c", "import json,pathlib; a=json.loads(pathlib.Path('tasks/specs/TG-018.json').read_text(encoding='utf-8')); b=json.loads(pathlib.Path('../../.pipeline/TG-018-spec.json').read_text(encoding='utf-8')); assert a == b"], "timeout": 10},
+    {"name": "TG-019 valid spec", "argv": ["{python}", "-m", "json.tool", "tasks/specs/TG-019.json"], "timeout": 10},
+    {"name": "whitespace", "argv": ["git", "diff", "--check"], "timeout": 10}
+  ],
+  "risk": "low",
+  "retry_limit": 0
+}
+
